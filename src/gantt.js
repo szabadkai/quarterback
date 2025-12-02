@@ -179,7 +179,6 @@ export const GanttChart = {
     html += '<div class="gantt-header-row">';
     html += '<div class="gantt-header-cell gantt-name-cell"></div>'; // Empty corner cell
     this.weeks.forEach((week) => {
-      const dateRange = this.formatDateRange(week.start, week.end);
       const workingDaysInfo = this.getWeekWorkingDays(week.start, week.end);
       const weekdayDates = this.getWeekdayDates(week.start, week.end, workingDaysInfo.holidayDates);
       const classes = ['gantt-header-cell'];
@@ -191,7 +190,6 @@ export const GanttChart = {
       
       html += `<div class="${classes.join(' ')}" data-week="${week.number}" title="${workingDaysInfo.holidayNames.join(', ') || 'No holidays'}">
         <div>${label}</div>
-        <div class="week-range">${dateRange}</div>
         <div class="weekday-dates">${weekdayDates}</div>
       </div>`;
     });
@@ -418,7 +416,7 @@ export const GanttChart = {
           <strong>${member.name}</strong><br>
           <span class="tooltip-role">${roleName}</span><br>
           <span class="tooltip-focus">${focusLabel}</span><br>
-          <span class="tooltip-percent ${utilizationClass}">${Math.round(capacityInfo.utilizationPercent)}% utilized</span>
+          <span class="tooltip-percent ${utilizationClass}">${Math.round(capacityInfo.committedMandays)}/${Math.round(capacityInfo.capacity)} days (${Math.round(capacityInfo.utilizationPercent)}%)</span>
         </span>
       </div>
     </div>`;
@@ -447,7 +445,7 @@ export const GanttChart = {
     const focusPercent = role?.focus ?? 100;
     
     if (!this.weeks.length) {
-      return { focusPercent, utilizationPercent: 0, capacity: 0, load: 0 };
+      return { focusPercent, utilizationPercent: 0, capacity: 0, load: 0, committedMandays: 0 };
     }
     
     const rangeStart = this.weeks[0].start;
@@ -455,9 +453,36 @@ export const GanttChart = {
     
     const capacity = this.calculatePersonCapacity(member, rangeStart, rangeEnd);
     const load = this.calculatePersonLoad(member.id, rangeStart, rangeEnd);
-    const utilizationPercent = capacity > 0 ? (load / capacity) * 100 : 0;
+    const committedMandays = this.calculatePersonCommittedMandays(member.id, rangeStart, rangeEnd);
+    const utilizationPercent = capacity > 0 ? (committedMandays / capacity) * 100 : 0;
     
-    return { focusPercent, utilizationPercent, capacity, load };
+    return { focusPercent, utilizationPercent, capacity, load, committedMandays };
+  },
+
+  // Calculate total committed man-days for a person (sum of mandayEstimate / assignees)
+  calculatePersonCommittedMandays(memberId, rangeStart, rangeEnd) {
+    let totalMandays = 0;
+    const rangeStartDate = new Date(rangeStart);
+    const rangeEndDate = new Date(rangeEnd);
+    
+    this.projects.forEach((project) => {
+      if (!project.startDate || !project.endDate) return;
+      
+      const assignees = Array.isArray(project.assignees) ? project.assignees : [];
+      if (!assignees.includes(memberId) || !project.mandayEstimate) return;
+      
+      const projStart = new Date(project.startDate);
+      const projEnd = new Date(project.endDate);
+      
+      // Check if project overlaps with range
+      if (projEnd < rangeStartDate || projStart > rangeEndDate) return;
+      
+      // Add this person's share of the man-day estimate
+      const numAssignees = assignees.length;
+      totalMandays += project.mandayEstimate / numAssignees;
+    });
+    
+    return totalMandays;
   },
 
   // Calculate utilization for a specific team member across visible weeks
@@ -465,17 +490,19 @@ export const GanttChart = {
     return this.calculatePersonCapacityInfo(member).utilizationPercent;
   },
 
-  // Calculate capacity for a single person over a date range
+  // Calculate capacity for a single person - counting actual working days minus holidays
   calculatePersonCapacity(member, rangeStart, rangeEnd) {
     const roleLookup = new Map((this.roles || []).map(r => [r.id, r]));
+    const regionLookup = new Map((this.regions || []).map(r => [r.id, r]));
     const companyHolidaySet = new Set(
       (this.companyHolidays || []).map(h => h.date)
     );
     
-    const role = roleLookup.get(member.roleId);
-    const focusPercent = (role?.focus ?? 100) / 100;
-    const ptoDates = new Set(member.ptoDates || []);
+    const role = roleLookup.get(member.roleId) || { focus: 100 };
+    const region = regionLookup.get(member.regionId) || {};
+    const focusMultiplier = Math.max(0, Math.min(role.focus ?? 100, 200)) / 100;
     
+    // Count actual working days in range (weekdays minus company holidays)
     let workingDays = 0;
     const cursor = new Date(rangeStart);
     const endDate = new Date(rangeEnd);
@@ -484,15 +511,18 @@ export const GanttChart = {
       const dayOfWeek = cursor.getDay();
       const dateStr = this.formatDateLocal(cursor);
       
-      if (dayOfWeek !== 0 && dayOfWeek !== 6 && 
-          !companyHolidaySet.has(dateStr) && 
-          !ptoDates.has(dateStr)) {
+      if (dayOfWeek !== 0 && dayOfWeek !== 6 && !companyHolidaySet.has(dateStr)) {
         workingDays += 1;
       }
       cursor.setDate(cursor.getDate() + 1);
     }
     
-    return workingDays * focusPercent;
+    // theoretical = workingDays * focus, then subtract PTO
+    const theoretical = Math.round(workingDays * focusMultiplier);
+    const timeOff = Math.round(region.ptoDays ?? 0);
+    const net = Math.max(0, theoretical - timeOff);
+    
+    return net;
   },
 
   // Calculate load for a single person over a date range

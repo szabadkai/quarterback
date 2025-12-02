@@ -33,12 +33,25 @@ class QuarterBackApp {
   }
 
   init() {
+    // Check if this is a new user and load demo data
+    if (Storage.isFirstTimeUser()) {
+      Storage.initializeDemoMode();
+      this.isDemoMode = true;
+    } else {
+      this.isDemoMode = Storage.isDemoMode();
+    }
+    
     this.loadData();
     this.ensureCapacityTotals();
     this.initUI();
     this.attachEventListeners();
     this.updateCapacityDisplay();
     this.refreshGantt();
+    
+    // Show demo mode banner if applicable
+    if (this.isDemoMode) {
+      this.showDemoBanner();
+    }
   }
 
   loadData() {
@@ -104,6 +117,8 @@ class QuarterBackApp {
 
   ensureCapacityTotals() {
     if (typeof this.capacity.netCapacity !== 'number') {
+      const quarterRange = GanttChart.getQuarterRange(this.settings.currentQuarter);
+      const holidaysInQuarter = this.getCompanyHolidayDatesInRange(quarterRange.start, quarterRange.end);
       this.capacity = {
         ...this.capacity,
         ...CapacityCalculator.calculate({
@@ -112,7 +127,7 @@ class QuarterBackApp {
           regions: this.regions,
           roles: this.roles,
           quarter: this.settings.currentQuarter,
-        }),
+        }, holidaysInQuarter),
       };
       Storage.saveCapacity(this.capacity);
     }
@@ -2085,7 +2100,7 @@ class QuarterBackApp {
       roles: this.roles,
     };
 
-    const result = CapacityCalculator.calculate(config);
+    const result = CapacityCalculator.calculate(config, holidaysInQuarter);
 
     document.getElementById('theoreticalCapacity').textContent = `${result.theoreticalCapacity} days`;
     document.getElementById('timeOffTotal').textContent = `-${result.timeOffTotal} days`;
@@ -2149,6 +2164,7 @@ class QuarterBackApp {
 
   updateCapacityDisplay() {
     const committed = this.calculateCommittedDays();
+    const backlog = this.calculateBacklogDays();
     const available = this.capacity.netCapacity || 0;
     const free = Math.max(0, available - committed);
     const utilization = CapacityCalculator.calculateUtilization(committed, available);
@@ -2156,10 +2172,12 @@ class QuarterBackApp {
     const availableEl = document.getElementById('capacityAvailable');
     const committedEl = document.getElementById('capacityCommitted');
     const freeEl = document.getElementById('capacityFree');
+    const backlogEl = document.getElementById('capacityBacklog');
     const percentEl = document.getElementById('capacityPercentage');
     if (availableEl) availableEl.textContent = available;
     if (committedEl) committedEl.textContent = committed;
     if (freeEl) freeEl.textContent = free;
+    if (backlogEl) backlogEl.textContent = backlog;
     if (percentEl) percentEl.textContent = `${utilization}%`;
 
     const fillBar = document.getElementById('capacityBarFill');
@@ -2175,8 +2193,13 @@ class QuarterBackApp {
   }
 
   calculateCommittedDays() {
+    // Sum up man-day estimates for all scheduled projects
+    // We use mandayEstimate (effort), not bar duration (which varies by assignee focus)
     return this.projects.reduce((total, project) => {
       if (!Array.isArray(project.assignees) || project.assignees.length === 0) {
+        return total;
+      }
+      if (!project.startDate || !project.endDate) {
         return total;
       }
       const start = new Date(project.startDate);
@@ -2184,9 +2207,110 @@ class QuarterBackApp {
       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
         return total;
       }
-      const workingDays = this.countWorkingDays(start, end);
-      return total + workingDays;
+      // Use the actual man-day estimate, not the bar duration
+      const mandayEstimate = project.mandayEstimate || 0;
+      return total + mandayEstimate;
     }, 0);
+  }
+
+  calculateBacklogDays() {
+    // Sum up man-day estimates for all backlog projects (no dates or no assignees)
+    return this.projects.reduce((total, project) => {
+      const hasAssignees = Array.isArray(project.assignees) && project.assignees.length > 0;
+      const hasDates = project.startDate && project.endDate;
+      
+      // Only count projects that are in backlog (no dates or unassigned)
+      if (hasAssignees && hasDates) {
+        return total;
+      }
+      
+      const mandayEstimate = project.mandayEstimate || 0;
+      return total + mandayEstimate;
+    }, 0);
+  }
+
+  openProjectModalWithDefaults(defaults = {}) {
+    this.openProjectModal(null);
+    
+    // Pre-fill dates
+    if (defaults.startDate) {
+      document.getElementById('projectStartDate').value = defaults.startDate;
+    }
+    if (defaults.endDate) {
+      document.getElementById('projectEndDate').value = defaults.endDate;
+    }
+    
+    // Pre-select assignee
+    if (defaults.assigneeId) {
+      const assigneeSelect = document.getElementById('projectAssignee');
+      if (assigneeSelect) {
+        assigneeSelect.value = String(defaults.assigneeId);
+      }
+    }
+    
+    // Calculate estimated man-days based on date range
+    if (defaults.startDate && defaults.endDate) {
+      const start = new Date(defaults.startDate);
+      const end = new Date(defaults.endDate);
+      const workingDays = this.countWorkingDays(start, end);
+      const manDayInput = document.getElementById('projectManDayEstimate');
+      if (manDayInput && workingDays > 0) {
+        manDayInput.value = workingDays;
+      }
+    }
+    
+    // Focus on project name
+    setTimeout(() => {
+      document.getElementById('projectName')?.focus();
+    }, 100);
+  }
+
+  showDemoBanner() {
+    // Create demo banner if it doesn't exist
+    let banner = document.getElementById('demoBanner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'demoBanner';
+      banner.className = 'demo-banner';
+      banner.innerHTML = `
+        <span class="demo-icon">🎓</span>
+        <span class="demo-text">You're viewing demo data. Explore the features, then start fresh with your own data.</span>
+        <button class="demo-btn demo-btn-primary" id="startFreshBtn">Start Fresh</button>
+        <button class="demo-btn demo-btn-secondary" id="dismissDemoBtn">Dismiss</button>
+      `;
+      document.body.insertBefore(banner, document.body.firstChild);
+      
+      document.getElementById('startFreshBtn').addEventListener('click', () => {
+        this.exitDemoMode();
+      });
+      
+      document.getElementById('dismissDemoBtn').addEventListener('click', () => {
+        banner.remove();
+      });
+    }
+  }
+
+  exitDemoMode() {
+    if (confirm('This will clear all demo data and give you a fresh start. Continue?')) {
+      Storage.clearAndStartFresh();
+      this.isDemoMode = false;
+      
+      // Reload the app with fresh data
+      this.loadData();
+      this.ensureCapacityTotals();
+      this.initUI();
+      this.updateCapacityDisplay();
+      this.refreshGantt();
+      
+      // Remove banner
+      const banner = document.getElementById('demoBanner');
+      if (banner) {
+        banner.remove();
+      }
+      
+      // Show welcome message
+      alert('Welcome to QuarterBack! You can now add your team and projects.');
+    }
   }
 
   openProjectModalWithDefaults(defaults = {}) {
@@ -2414,6 +2538,35 @@ class QuarterBackApp {
       // Single assignee: replace entirely
       next.assignees = [assigneeChange.to];
       assignmentChanged = true;
+      
+      // Recalculate end date based on new assignee's focus percentage
+      if (next.startDate && next.mandayEstimate) {
+        const oldMember = this.team.find((m) => m.id === assigneeChange.from);
+        const newMember = this.team.find((m) => m.id === assigneeChange.to);
+        const oldRole = this.roles.find((r) => r.id === oldMember?.roleId);
+        const newRole = this.roles.find((r) => r.id === newMember?.roleId);
+        const oldFocus = (oldRole?.focus ?? 100) / 100;
+        const newFocus = (newRole?.focus ?? 100) / 100;
+        
+        // Only recalculate if focus percentages differ
+        if (oldFocus !== newFocus) {
+          const requiredDays = next.mandayEstimate;
+          const adjustedDays = Math.ceil(requiredDays / newFocus);
+          const startDate = new Date(next.startDate);
+          
+          // Get new member's unavailable dates
+          const companyHolidayDates = this.getCompanyHolidayDatesInRange(
+            startDate,
+            new Date(startDate.getTime() + adjustedDays * 2 * 24 * 60 * 60 * 1000)
+          );
+          const ptoDates = Array.isArray(newMember?.ptoDates) ? newMember.ptoDates : [];
+          const unavailableDates = new Set([...ptoDates, ...companyHolidayDates]);
+          
+          const newEnd = this.addWorkingDaysForMember(startDate, adjustedDays, unavailableDates);
+          next.endDate = this.formatDateInput(newEnd);
+          timelineChanged = true;
+        }
+      }
     }
 
     if (!timelineChanged && !assignmentChanged) return;
@@ -3346,6 +3499,8 @@ class QuarterBackApp {
   changeQuarter(quarter) {
     this.settings.currentQuarter = quarter;
     Storage.saveSettings(this.settings);
+    const quarterRange = GanttChart.getQuarterRange(quarter);
+    const holidaysInQuarter = this.getCompanyHolidayDatesInRange(quarterRange.start, quarterRange.end);
     this.capacity = {
       ...this.capacity,
       ...CapacityCalculator.calculate({
@@ -3354,7 +3509,7 @@ class QuarterBackApp {
         regions: this.regions,
         roles: this.roles,
         quarter: this.settings.currentQuarter,
-      }),
+      }, holidaysInQuarter),
     };
     Storage.saveCapacity(this.capacity);
     this.syncQuarterSelect();

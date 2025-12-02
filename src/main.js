@@ -109,7 +109,8 @@ function getAppTemplate() {
         <div class="capacity-text">
           <span id="capacityAvailable">0</span> days available |
           <span id="capacityCommitted">0</span> committed |
-          <span id="capacityFree">0</span> free
+          <span id="capacityFree">0</span> free |
+          <span id="capacityBacklog">0</span> in backlog
           <span class="conflict-indicator" id="conflictIndicator" style="display: none;" title="Click for details"></span>
         </div>
         <div class="capacity-bar">

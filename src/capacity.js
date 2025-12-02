@@ -25,20 +25,22 @@ export const CapacityCalculator = {
     return new Map(records.map((record) => [record.id, record]));
   },
 
-  calculateWithProfiles(config, workingDays) {
+  calculateWithProfiles(config, workingDays, companyHolidays = []) {
     const regionLookup = this.buildLookup(config.regions);
     const roleLookup = this.buildLookup(config.roles);
+    
+    // Subtract company holidays from working days
+    const holidayCount = Array.isArray(companyHolidays) ? companyHolidays.length : 0;
+    const netWorkingDays = workingDays - holidayCount;
 
     return config.team.reduce(
       (acc, member) => {
         const role = roleLookup.get(member.roleId) || { focus: 100 };
         const region = regionLookup.get(member.regionId) || {};
         const focusMultiplier = Math.max(0, Math.min(role.focus ?? 100, 200)) / 100;
-        const theoretical = Math.round(workingDays * focusMultiplier);
-        const timeOff = Math.round(
-          (region.ptoDays ?? config.ptoPerPerson ?? 0) +
-            (region.holidays ?? config.companyHolidays ?? 0),
-        );
+        const theoretical = Math.round(netWorkingDays * focusMultiplier);
+        // Only subtract PTO days, holidays are already deducted from working days
+        const timeOff = Math.round(region.ptoDays ?? config.ptoPerPerson ?? 0);
         const net = Math.max(0, theoretical - timeOff);
 
         acc.theoreticalCapacity += theoretical;
@@ -58,7 +60,7 @@ export const CapacityCalculator = {
     );
   },
 
-  calculate(config) {
+  calculate(config, companyHolidays = []) {
     const workingDays = this.getWorkingDaysInQuarter(config.quarter);
     const hasProfiles = Array.isArray(config.team) && config.team.length > 0;
     let theoreticalCapacity = 0;
@@ -66,7 +68,7 @@ export const CapacityCalculator = {
     let memberBreakdown = [];
 
     if (hasProfiles && config.regions?.length && config.roles?.length) {
-      const profile = this.calculateWithProfiles(config, workingDays);
+      const profile = this.calculateWithProfiles(config, workingDays, companyHolidays);
       theoreticalCapacity = profile.theoreticalCapacity;
       timeOffTotal = profile.timeOffTotal;
       memberBreakdown = profile.members;

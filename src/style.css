@@ -1288,6 +1288,7 @@ body.theme-dark .theme-pill {
   display: flex;
   flex-direction: column;
   min-width: fit-content;
+  padding-bottom: 2rem;
 }
 
 .gantt-header-row {
@@ -1336,16 +1337,18 @@ body.theme-dark .theme-pill {
 }
 
 .weekday-dates {
-  font-size: 0.75rem;
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  font-size: 0.7rem;
   font-weight: 500;
   color: var(--text-primary);
   margin-top: 4px;
-  letter-spacing: 1px;
+  white-space: nowrap;
 }
 
 .weekday-date {
-  display: inline-block;
-  min-width: 16px;
+  min-width: 14px;
   text-align: center;
 }
 
@@ -2678,4 +2681,77 @@ select[multiple] {
 .spreadsheet-status-in-progress { color: #22d3ee; }
 .spreadsheet-status-at-risk { color: #fcd34d; }
 .spreadsheet-status-blocked { color: #fb7185; }
+
+/* Demo Mode Banner */
+.demo-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.demo-icon {
+  font-size: 18px;
+}
+
+.demo-text {
+  flex: 0 1 auto;
+}
+
+.demo-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.demo-btn-primary {
+  background: white;
+  color: #6366f1;
+}
+
+.demo-btn-primary:hover {
+  background: #f0f0ff;
+  transform: translateY(-1px);
+}
+
+.demo-btn-secondary {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.demo-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Adjust body padding when demo banner is visible */
+body:has(.demo-banner) .app {
+  padding-top: 48px;
+}
 .spreadsheet-status-completed { color: #4ade80; }
