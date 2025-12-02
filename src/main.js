@@ -454,9 +454,51 @@ function getAppTemplate() {
             <button class="modal-close" id="closeHolidaysModal" aria-label="Close holidays modal">&times;</button>
           </div>
           <div class="modal-body">
+            <div class="form-group">
+              <label>Import Public Holidays:</label>
+              <div class="holiday-import-row">
+                <select id="countryCodeSelect">
+                  <option value="AU">🇦🇺 Australia</option>
+                  <option value="AT">🇦🇹 Austria</option>
+                  <option value="BE">🇧🇪 Belgium</option>
+                  <option value="BR">🇧🇷 Brazil</option>
+                  <option value="CA">🇨🇦 Canada</option>
+                  <option value="CZ">🇨🇿 Czech Republic</option>
+                  <option value="DK">🇩🇰 Denmark</option>
+                  <option value="FI">🇫🇮 Finland</option>
+                  <option value="FR">🇫🇷 France</option>
+                  <option value="DE">🇩🇪 Germany</option>
+                  <option value="HK">🇭🇰 Hong Kong</option>
+                  <option value="HU">🇭🇺 Hungary</option>
+                  <option value="IN">🇮🇳 India</option>
+                  <option value="IE">🇮🇪 Ireland</option>
+                  <option value="IL">🇮🇱 Israel</option>
+                  <option value="IT">🇮🇹 Italy</option>
+                  <option value="JP">🇯🇵 Japan</option>
+                  <option value="MX">🇲🇽 Mexico</option>
+                  <option value="NL">🇳🇱 Netherlands</option>
+                  <option value="NZ">🇳🇿 New Zealand</option>
+                  <option value="NO">🇳🇴 Norway</option>
+                  <option value="PL">🇵🇱 Poland</option>
+                  <option value="PT">🇵🇹 Portugal</option>
+                  <option value="SG">🇸🇬 Singapore</option>
+                  <option value="ZA">🇿🇦 South Africa</option>
+                  <option value="KR">🇰🇷 South Korea</option>
+                  <option value="ES">🇪🇸 Spain</option>
+                  <option value="SE">🇸🇪 Sweden</option>
+                  <option value="CH">🇨🇭 Switzerland</option>
+                  <option value="GB">🇬🇧 United Kingdom</option>
+                  <option value="US" selected>🇺🇸 United States</option>
+                </select>
+                <input type="number" id="holidayYearInput" min="2020" max="2030" placeholder="Year" />
+                <button class="btn btn-small btn-secondary" id="fetchHolidaysBtn" type="button">🌐 Fetch</button>
+              </div>
+              <p class="form-hint">Fetch public holidays from <a href="https://date.nager.at" target="_blank" rel="noopener">Nager.Date API</a> (free, no API key needed)</p>
+            </div>
+            <hr class="form-divider" />
             <p class="form-hint">Define company-wide holidays that apply to all team members. These dates will be excluded from capacity calculations.</p>
             <div class="form-group">
-              <label>Add Holiday:</label>
+              <label>Add Holiday Manually:</label>
               <div class="holiday-input-row">
                 <input type="date" id="holidayDateInput" />
                 <input type="text" id="holidayNameInput" placeholder="Holiday name (e.g., Christmas)" maxlength="50" />

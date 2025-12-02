@@ -123,6 +123,7 @@ export const Storage = {
       groupBy: 'person',
       currentQuarter: this.getCurrentQuarter(),
       theme: prefersDark ? 'monokai' : 'light',
+      countryCode: 'US',
     };
   },
 
@@ -159,15 +160,19 @@ export const Storage = {
     const year = new Date().getFullYear();
     return [
       { date: `${year}-01-01`, name: "New Year's Day" },
-      { date: `${year}-01-15`, name: 'MLK Day' },
-      { date: `${year}-02-19`, name: "Presidents' Day" },
-      { date: `${year}-05-27`, name: 'Memorial Day' },
+      { date: `${year}-01-02`, name: 'New Year Holiday' },
+      { date: `${year}-01-03`, name: 'New Year Holiday' },
+      { date: `${year}-01-20`, name: 'MLK Day' },
+      { date: `${year}-02-17`, name: "Presidents' Day" },
+      { date: `${year}-05-26`, name: 'Memorial Day' },
       { date: `${year}-07-04`, name: 'Independence Day' },
-      { date: `${year}-09-02`, name: 'Labor Day' },
-      { date: `${year}-11-28`, name: 'Thanksgiving' },
-      { date: `${year}-11-29`, name: 'Day after Thanksgiving' },
+      { date: `${year}-09-01`, name: 'Labor Day' },
+      { date: `${year}-11-27`, name: 'Thanksgiving' },
+      { date: `${year}-11-28`, name: 'Day after Thanksgiving' },
+      { date: `${year}-12-24`, name: 'Christmas Eve' },
       { date: `${year}-12-25`, name: 'Christmas Day' },
       { date: `${year}-12-26`, name: 'Day after Christmas' },
+      { date: `${year}-12-31`, name: "New Year's Eve" },
     ];
   },
 

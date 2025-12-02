@@ -82,23 +82,30 @@ export const GanttChart = {
       if (rangeEnd > originalEnd) rangeEnd = new Date(originalEnd);
     }
 
+    // Align to Monday - find the Monday on or before rangeStart
+    const dayOfWeek = rangeStart.getDay();
+    // dayOfWeek: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const alignedStart = new Date(rangeStart);
+    alignedStart.setDate(alignedStart.getDate() + mondayOffset);
+
     const weeks = [];
-    let cursor = new Date(rangeStart);
+    let cursor = new Date(alignedStart);
     let index = 0;
     while (cursor <= rangeEnd && index < weekLimit) {
       const weekStart = new Date(cursor);
       const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-      if (weekEnd > rangeEnd) {
-        weekEnd.setTime(rangeEnd.getTime());
+      weekEnd.setDate(weekEnd.getDate() + 6); // Mon-Sun
+      
+      // Only add weeks that overlap with the actual range
+      if (weekEnd >= originalStart) {
+        weeks.push({
+          number: index + 1,
+          start: new Date(weekStart),
+          end: new Date(weekEnd),
+          isCurrent: this.isCurrentWeek(weekStart, weekEnd),
+        });
       }
-
-      weeks.push({
-        number: index + 1,
-        start: new Date(weekStart),
-        end: new Date(weekEnd),
-        isCurrent: this.isCurrentWeek(weekStart, weekEnd),
-      });
 
       cursor.setDate(cursor.getDate() + 7);
       index += 1;
@@ -173,14 +180,19 @@ export const GanttChart = {
     html += '<div class="gantt-header-cell gantt-name-cell"></div>'; // Empty corner cell
     this.weeks.forEach((week) => {
       const dateRange = this.formatDateRange(week.start, week.end);
+      const workingDaysInfo = this.getWeekWorkingDays(week.start, week.end);
+      const weekdayDates = this.getWeekdayDates(week.start, week.end, workingDaysInfo.holidayDates);
       const classes = ['gantt-header-cell'];
       if (week.isCurrent) classes.push('current');
+      if (workingDaysInfo.holidays > 0) classes.push('has-holidays');
       const label = this.viewType === 'month'
         ? week.start.toLocaleDateString('en-US', { month: 'short' })
         : `Week ${week.number}`;
-      html += `<div class="${classes.join(' ')}" data-week="${week.number}">
+      
+      html += `<div class="${classes.join(' ')}" data-week="${week.number}" title="${workingDaysInfo.holidayNames.join(', ') || 'No holidays'}">
         <div>${label}</div>
         <div class="week-range">${dateRange}</div>
+        <div class="weekday-dates">${weekdayDates}</div>
       </div>`;
     });
     html += '</div>';
@@ -230,6 +242,64 @@ export const GanttChart = {
     });
     html += '</div>';
     return html;
+  },
+
+  // Calculate working days info for a week (for header display)
+  getWeekWorkingDays(weekStart, weekEnd) {
+    const companyHolidayMap = new Map(
+      (this.companyHolidays || []).map(h => [h.date, h.name])
+    );
+    
+    let workDays = 0;
+    let holidays = 0;
+    const holidayNames = [];
+    const holidayDates = new Set();
+    
+    const cursor = new Date(weekStart);
+    const endDate = new Date(weekEnd);
+    
+    while (cursor <= endDate) {
+      const dayOfWeek = cursor.getDay();
+      const dateStr = this.formatDateLocal(cursor);
+      
+      // Skip weekends
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        if (companyHolidayMap.has(dateStr)) {
+          holidays += 1;
+          holidayNames.push(companyHolidayMap.get(dateStr));
+          holidayDates.add(dateStr);
+        } else {
+          workDays += 1;
+        }
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    
+    return { workDays, holidays, holidayNames, holidayDates };
+  },
+
+  // Get weekday dates display (Mon-Fri) for a week
+  // Weeks are now aligned to Monday, so just show dates 0-4 from weekStart
+  getWeekdayDates(weekStart, weekEnd, holidayDates = new Set()) {
+    const dates = [];
+    const monday = new Date(weekStart);
+    
+    // Generate Mon-Fri dates (days 0-4 from Monday start)
+    for (let i = 0; i < 5; i++) {
+      const cursor = new Date(monday);
+      cursor.setDate(monday.getDate() + i);
+      const day = cursor.getDate();
+      const dateStr = this.formatDateLocal(cursor);
+      const isHoliday = holidayDates.has(dateStr);
+      
+      if (isHoliday) {
+        dates.push(`<span class="weekday-date holiday">${day}</span>`);
+      } else {
+        dates.push(`<span class="weekday-date">${day}</span>`);
+      }
+    }
+    
+    return dates.join(' ');
   },
 
   // Calculate available team capacity for a given week

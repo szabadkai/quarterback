@@ -1,0 +1,18 @@
+{
+  "awsAuthRefresh": "aws sso login --profile claude-code",
+  "env": {
+    "AWS_PROFILE": "claude-code",
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://metrics.aienablement.global.expertcity.com",
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
+    "MAX_THINKING_TOKENS": "1024",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "arn:aws:bedrock:us-east-1:654654553775:application-inference-profile/b6ei3nvj2rq2",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "arn:aws:bedrock:us-east-1:654654553775:application-inference-profile/m3eu70rvp0ee",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "arn:aws:bedrock:us-east-1:654654553775:application-inference-profile/b6ei3nvj2rq2"
+  },
+  "otelHeadersHelper": "$HOME/.claude/claude-code-metrics-headers.sh"
+}

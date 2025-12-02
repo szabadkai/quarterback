@@ -1305,7 +1305,7 @@ body.theme-dark .theme-pill {
   width: var(--gantt-column-width);
   min-width: var(--gantt-column-width);
   max-width: var(--gantt-column-width);
-  padding: 0.75rem;
+  padding: 0.5rem 0.75rem;
   border-right: 1px solid var(--border-color);
   text-align: center;
   font-size: 0.8rem;
@@ -1316,6 +1316,59 @@ body.theme-dark .theme-pill {
 .gantt-header-cell.current {
   background: var(--highlight-bg);
   color: var(--highlight-text);
+}
+
+.gantt-header-cell.has-holidays {
+  background: rgba(251, 191, 36, 0.1);
+  border-bottom: 2px solid #f59e0b;
+}
+
+.gantt-header-cell.has-holidays.current {
+  background: var(--highlight-bg);
+  border-bottom: 2px solid #f59e0b;
+}
+
+.week-range {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.weekday-dates {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-top: 4px;
+  letter-spacing: 1px;
+}
+
+.weekday-date {
+  display: inline-block;
+  min-width: 16px;
+  text-align: center;
+}
+
+.weekday-date.holiday {
+  color: #ef4444;
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.week-workdays {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  padding: 2px 6px;
+  background: var(--surface-elevated);
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.gantt-header-cell.has-holidays .week-workdays {
+  background: rgba(251, 191, 36, 0.2);
+  color: #b45309;
 }
 
 .gantt-header-cell.gantt-name-cell {
@@ -1471,9 +1524,17 @@ body.theme-dark .theme-pill {
   color: var(--highlight-text);
 }
 
-.week-range {
+.week-header .week-range {
   font-size: 0.7rem;
   color: var(--text-secondary);
+}
+
+.week-header .weekday-dates {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-top: 4px;
+  letter-spacing: 1px;
 }
 
 .gantt-row {
@@ -2217,6 +2278,29 @@ select[multiple] {
 
 .holiday-input-row input[type="text"] {
   flex: 1;
+}
+
+.holiday-import-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.holiday-import-row select {
+  flex: 1;
+  min-width: 160px;
+}
+
+.holiday-import-row input[type="number"] {
+  width: 80px;
+  text-align: center;
+}
+
+.form-divider {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 1rem 0;
 }
 
 .holidays-list {

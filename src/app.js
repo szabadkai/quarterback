@@ -295,6 +295,7 @@ class QuarterBackApp {
     document.getElementById('closeHolidaysModal')?.addEventListener('click', () => this.closeHolidaysModal());
     document.getElementById('saveHolidaysBtn')?.addEventListener('click', () => this.closeHolidaysModal());
     document.getElementById('addHolidayBtn')?.addEventListener('click', () => this.addCompanyHoliday());
+    document.getElementById('fetchHolidaysBtn')?.addEventListener('click', () => this.fetchPublicHolidays());
 
     // Spreadsheet modal
     document.getElementById('spreadsheetBtn')?.addEventListener('click', () => this.openSpreadsheetModal());
@@ -1609,8 +1610,92 @@ class QuarterBackApp {
 
   // Company Holidays Management
   openHolidaysModal() {
+    // Set country code from settings
+    const countrySelect = document.getElementById('countryCodeSelect');
+    if (countrySelect && this.settings.countryCode) {
+      countrySelect.value = this.settings.countryCode;
+    }
+    
+    // Set year to current or next year
+    const yearInput = document.getElementById('holidayYearInput');
+    if (yearInput) {
+      const currentYear = new Date().getFullYear();
+      yearInput.value = currentYear;
+    }
+    
     this.renderCompanyHolidays();
     document.getElementById('holidaysModal')?.classList.add('active');
+  }
+
+  async fetchPublicHolidays() {
+    const countrySelect = document.getElementById('countryCodeSelect');
+    const yearInput = document.getElementById('holidayYearInput');
+    const fetchBtn = document.getElementById('fetchHolidaysBtn');
+    
+    const countryCode = countrySelect?.value || 'US';
+    const year = parseInt(yearInput?.value, 10) || new Date().getFullYear();
+    
+    // Save country code to settings
+    this.settings.countryCode = countryCode;
+    Storage.saveSettings(this.settings);
+    
+    // Disable button during fetch
+    if (fetchBtn) {
+      fetchBtn.disabled = true;
+      fetchBtn.textContent = '⏳ Fetching...';
+    }
+    
+    try {
+      const response = await fetch(`https://date.nager.at/api/v3/publicholidays/${year}/${countryCode}`);
+      
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+      
+      const holidays = await response.json();
+      
+      if (!Array.isArray(holidays) || holidays.length === 0) {
+        this.showToast('No holidays found for this country/year', 'error');
+        return;
+      }
+      
+      // Filter to only public holidays (type includes 'Public')
+      const publicHolidays = holidays.filter(h => 
+        Array.isArray(h.types) && h.types.includes('Public')
+      );
+      
+      // Get existing holiday dates to avoid duplicates
+      const existingDates = new Set(this.companyHolidays.map(h => h.date));
+      
+      // Add new holidays
+      let addedCount = 0;
+      publicHolidays.forEach((holiday) => {
+        if (!existingDates.has(holiday.date)) {
+          this.companyHolidays.push({
+            date: holiday.date,
+            name: holiday.name || holiday.localName || 'Public Holiday',
+          });
+          addedCount += 1;
+        }
+      });
+      
+      if (addedCount === 0) {
+        this.showToast('All holidays already exist', 'success');
+      } else {
+        Storage.saveCompanyHolidays(this.companyHolidays);
+        this.renderCompanyHolidays();
+        this.showToast(`Added ${addedCount} public holiday${addedCount !== 1 ? 's' : ''}`, 'success');
+      }
+      
+    } catch (error) {
+      console.error('Failed to fetch holidays:', error);
+      this.showToast('Failed to fetch holidays. Check your connection.', 'error');
+    } finally {
+      if (fetchBtn) {
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = '🌐 Fetch';
+      }
+    }
   }
 
   closeHolidaysModal() {
