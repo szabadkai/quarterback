@@ -64,7 +64,13 @@ class QuarterBackApp {
       const iceImpact = this.normalizeIceValue(project.iceImpact ?? 5);
       const iceConfidence = this.normalizeIceValue(project.iceConfidence ?? 5);
       const iceEffort = this.normalizeIceValue(project.iceEffort ?? 5);
-      const storyPoints = this.estimateStoryPoints(iceEffort, iceConfidence, project.storyPoints);
+
+      // Always recalculate story points from ICE inputs to avoid stale values
+      const storyPoints = this.estimateStoryPoints(iceEffort, iceConfidence, null);
+
+      // Also recalculate ICE score
+      const iceScore = this.calculateIceScore(iceImpact, iceConfidence, iceEffort);
+
       const mandayEstimate = this.normalizeManDayEstimate(project.mandayEstimate)
         ?? Math.max(this.minAutoScheduleDays, Math.round(storyPoints * this.storyPointDayRatio));
       return {
@@ -81,6 +87,7 @@ class QuarterBackApp {
         iceImpact,
         iceConfidence,
         iceEffort,
+        iceScore,
         storyPoints,
         mandayEstimate,
       };
@@ -228,7 +235,6 @@ class QuarterBackApp {
     document.getElementById('addFirstProjectBtn')?.addEventListener('click', () => this.openProjectModal());
     document.getElementById('autoAllocateBtn')?.addEventListener('click', () => this.autoAllocateBacklog());
     document.getElementById('resetBoardBtn')?.addEventListener('click', () => this.resetBoardToBacklog());
-    document.getElementById('filterBtn')?.addEventListener('click', () => this.showToast('Advanced filters coming soon', 'success'));
     document.getElementById('importBtn')?.addEventListener('click', () => this.openImportModal());
 
     document.getElementById('quarterSelect')?.addEventListener('change', (event) => {
@@ -2138,8 +2144,7 @@ class QuarterBackApp {
     const config = {
       numEngineers: engineersValue || this.team.length || 1,
       ptoPerPerson: parseInt(document.getElementById('ptoPerPerson').value, 10) || 0,
-      companyHolidays: holidaysInQuarter.length,
-      companyHolidayDates: holidaysInQuarter,
+      // NOTE: companyHolidays passed as array via second parameter, not as count in config
       adhocReserve: parseInt(document.getElementById('adhocReserve').value, 10) || 0,
       bugReserve: parseInt(document.getElementById('bugReserve').value, 10) || 0,
       quarter: this.settings.currentQuarter,
@@ -2148,6 +2153,7 @@ class QuarterBackApp {
       roles: this.roles,
     };
 
+    // Pass holidays as array (second parameter), not as count in config
     const result = CapacityCalculator.calculate(config, holidaysInQuarter);
 
     document.getElementById('theoreticalCapacity').textContent = `${result.theoreticalCapacity} days`;
@@ -2226,13 +2232,26 @@ class QuarterBackApp {
     if (committedEl) committedEl.textContent = committed;
     if (freeEl) freeEl.textContent = free;
     if (backlogEl) backlogEl.textContent = backlog;
-    if (percentEl) percentEl.textContent = `${utilization}%`;
+
+    // Handle special utilization cases (null, Infinity)
+    if (percentEl) {
+      if (utilization === null) {
+        percentEl.textContent = 'N/A';
+      } else if (utilization === Infinity) {
+        percentEl.textContent = 'Over capacity';
+      } else {
+        percentEl.textContent = `${utilization}%`;
+      }
+    }
 
     const fillBar = document.getElementById('capacityBarFill');
     if (fillBar) {
-      fillBar.style.width = `${Math.min(100, utilization)}%`;
+      const fillWidth = utilization === null || utilization === Infinity ? 100 : Math.min(100, utilization);
+      fillBar.style.width = `${fillWidth}%`;
       fillBar.className = 'capacity-bar-fill';
-      if (utilization >= 100) {
+      if (utilization === null) {
+        fillBar.classList.add('none');
+      } else if (utilization === Infinity || utilization >= 100) {
         fillBar.classList.add('danger');
       } else if (utilization >= 90) {
         fillBar.classList.add('warning');
@@ -2240,6 +2259,17 @@ class QuarterBackApp {
     }
   }
 
+  /**
+   * Calculate total committed capacity across all scheduled projects
+   *
+   * DESIGN DECISION: Commitment represents "effort required", not "calendar time consumed"
+   * - A 10-day project counts as 10 committed days regardless of assignee focus
+   * - A manager with 50% IC focus assigned a 10-day project: commits 10 days (not 20)
+   * - The Gantt bar duration will stretch to show calendar time (20 days)
+   * - But the commitment metric shows effort, matching capacity estimates
+   *
+   * This ensures capacity planning is based on work effort, not individual schedules.
+   */
   calculateCommittedDays() {
     // Sum up man-day estimates for all scheduled projects
     // We use mandayEstimate (effort), not bar duration (which varies by assignee focus)
@@ -2572,8 +2602,26 @@ class QuarterBackApp {
     }
 
     if (timelineChanged && next.startDate && next.endDate) {
-      if (new Date(next.startDate) > new Date(next.endDate)) {
+      const start = new Date(next.startDate);
+      const end = new Date(next.endDate);
+
+      // Validate end date is after start date
+      if (start > end) {
+        this.showToast('End date must be after start date', 'error');
         return;
+      }
+
+      // Validate dates are within reasonable bounds (not too far in future/past)
+      const currentQuarter = this.settings.currentQuarter;
+      if (currentQuarter) {
+        const quarterRange = GanttChart.getQuarterRange(currentQuarter);
+        const quarterStart = new Date(quarterRange.start);
+        const quarterEnd = new Date(quarterRange.end);
+
+        // Allow some flexibility: warn if project extends beyond quarter, but allow it
+        if (end < quarterStart || start > quarterEnd) {
+          this.showToast(`Project dates are outside ${currentQuarter}. Consider adjusting.`, 'warning');
+        }
       }
     }
 
@@ -2696,7 +2744,14 @@ class QuarterBackApp {
     return this.clampToWorkingDay(base);
   }
 
-  countWorkingDays(start, end) {
+  /**
+   * Count working days between two dates, excluding weekends and optionally company holidays
+   * @param {Date|string} start - Start date
+   * @param {Date|string} end - End date
+   * @param {Set<string>} [companyHolidaySet] - Optional set of ISO date strings for company holidays
+   * @returns {number} Number of working days
+   */
+  countWorkingDays(start, end, companyHolidaySet = null) {
     const startDate = this.clampToWorkingDay(start);
     const endDate = end instanceof Date ? new Date(end) : new Date(end);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return 0;
@@ -2704,7 +2759,9 @@ class QuarterBackApp {
     const cursor = new Date(startDate);
     let count = 0;
     while (cursor <= endDate) {
-      if (!this.isWeekend(cursor)) {
+      const dateStr = cursor.toISOString().split('T')[0];
+      const isHoliday = companyHolidaySet && companyHolidaySet.has(dateStr);
+      if (!this.isWeekend(cursor) && !isHoliday) {
         count += 1;
       }
       cursor.setDate(cursor.getDate() + 1);
@@ -3209,7 +3266,12 @@ class QuarterBackApp {
         this.showToast('Import completed successfully', 'success');
       } catch (error) {
         console.error('Import failed', error);
-        this.showToast(isCsv ? 'Invalid CSV file' : 'Invalid JSON file', 'error');
+        // Show detailed error message
+        let errorMessage = isCsv ? 'CSV import failed' : 'JSON import failed';
+        if (error.message) {
+          errorMessage += `: ${error.message}`;
+        }
+        this.showToast(errorMessage, 'error');
       }
     };
     reader.onerror = () => {
@@ -3465,6 +3527,20 @@ class QuarterBackApp {
     const assignees = this.mapAssigneesByName(assigneeNames);
     const startDate = safeText(row['Start Date']);
     const endDate = safeText(row['End Date']);
+
+    // Validate date range (end must be after start)
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+        if (end < start) {
+          console.warn(`Row ${rowNumber}: End date (${endDate}) is before start date (${startDate}). Skipping dates.`);
+          // Clear invalid dates rather than import bad data
+          return null;
+        }
+      }
+    }
+
     const impact = this.normalizeIceValue(row['ICE Impact'] ?? 5);
     const confidence = this.normalizeIceValue(row['ICE Confidence'] ?? 5);
     const effort = this.normalizeIceValue(row['ICE Effort'] ?? 5);
@@ -3600,11 +3676,39 @@ class QuarterBackApp {
   getVisibleProjects() {
     let filtered = this.projects;
     
-    // Text search
+    // Enhanced text search (name, description, assignee names, dates, ICE)
     if (this.searchTerm) {
       filtered = filtered.filter((project) => {
-        const haystack = `${project.name} ${project.description || ''}`.toLowerCase();
-        return haystack.includes(this.searchTerm);
+        // Basic text search
+        const textHaystack = `${project.name} ${project.description || ''}`.toLowerCase();
+        if (textHaystack.includes(this.searchTerm)) return true;
+
+        // Search by assignee names
+        if (Array.isArray(project.assignees) && project.assignees.length > 0) {
+          const assigneeNames = project.assignees
+            .map(id => this.team.find(m => m.id === id)?.name || '')
+            .join(' ')
+            .toLowerCase();
+          if (assigneeNames.includes(this.searchTerm)) return true;
+        }
+
+        // Search by dates
+        const dateHaystack = `${project.startDate || ''} ${project.endDate || ''}`.toLowerCase();
+        if (dateHaystack.includes(this.searchTerm)) return true;
+
+        // Search by ICE score (e.g., "ice:8" or ">7")
+        if (project.iceScore) {
+          const iceStr = project.iceScore.toString();
+          if (iceStr.includes(this.searchTerm)) return true;
+        }
+
+        // Search by man-day estimate
+        if (project.mandayEstimate) {
+          const mandayStr = project.mandayEstimate.toString();
+          if (mandayStr.includes(this.searchTerm)) return true;
+        }
+
+        return false;
       });
     }
     
@@ -3693,8 +3797,65 @@ class QuarterBackApp {
           }
         }
       }
+
+      // Check for tasks scheduled during PTO
+      if (Array.isArray(member.ptoDates) && member.ptoDates.length > 0) {
+        const ptoSet = new Set(member.ptoDates);
+        memberProjects.forEach((project) => {
+          const projectStart = new Date(project.startDate);
+          const projectEnd = new Date(project.endDate);
+          const cursor = new Date(projectStart);
+
+          while (cursor <= projectEnd) {
+            const dateStr = cursor.toISOString().split('T')[0];
+            if (ptoSet.has(dateStr) && !this.isWeekend(cursor)) {
+              conflicts.push({
+                type: 'pto-conflict',
+                member: member.name,
+                project: project.name,
+                date: dateStr,
+                message: `${member.name} has task "${project.name}" scheduled during PTO on ${dateStr}`,
+              });
+              break; // Only report once per project
+            }
+            cursor.setDate(cursor.getDate() + 1);
+          }
+        });
+      }
     });
-    
+
+    // Check for tasks scheduled on company holidays
+    if (Array.isArray(this.companyHolidays) && this.companyHolidays.length > 0) {
+      const holidaySet = new Set(this.companyHolidays.map(h => h.date || h));
+      scheduledProjects.forEach((project) => {
+        const projectStart = new Date(project.startDate);
+        const projectEnd = new Date(project.endDate);
+        const cursor = new Date(projectStart);
+        const assigneeNames = project.assignees
+          .map(id => this.team.find(m => m.id === id)?.name)
+          .filter(Boolean)
+          .join(', ');
+
+        while (cursor <= projectEnd) {
+          const dateStr = cursor.toISOString().split('T')[0];
+          if (holidaySet.has(dateStr) && !this.isWeekend(cursor)) {
+            const holiday = this.companyHolidays.find(h => (h.date || h) === dateStr);
+            const holidayName = holiday?.name || 'Company holiday';
+            conflicts.push({
+              type: 'holiday-conflict',
+              project: project.name,
+              assignees: assigneeNames,
+              date: dateStr,
+              holiday: holidayName,
+              message: `Project "${project.name}" (${assigneeNames}) scheduled during ${holidayName} on ${dateStr}`,
+            });
+            break; // Only report once per project
+          }
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      });
+    }
+
     // Check for capacity overruns per engineer
     const { start, end } = GanttChart.getQuarterRange(this.settings.currentQuarter);
     const quarterWorkingDays = this.countWorkingDays(new Date(start), new Date(end));

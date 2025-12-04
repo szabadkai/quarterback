@@ -807,7 +807,29 @@ export const Storage = {
 
   importData(data) {
     if (data.capacity) this.saveCapacity(data.capacity);
-    if (data.projects) this.saveProjects(data.projects);
+
+    // Validate and clean projects before importing
+    if (data.projects) {
+      const validProjects = Array.isArray(data.projects)
+        ? data.projects.filter((project) => {
+            // Validate date ranges
+            if (project.startDate && project.endDate) {
+              const start = new Date(project.startDate);
+              const end = new Date(project.endDate);
+              if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+                if (end < start) {
+                  console.warn(`Project "${project.name || 'Unknown'}": End date before start date. Clearing dates.`);
+                  project.startDate = '';
+                  project.endDate = '';
+                }
+              }
+            }
+            return true; // Keep project but with cleaned dates
+          })
+        : [];
+      this.saveProjects(validProjects);
+    }
+
     if (data.team) this.saveTeam(data.team);
     if (data.settings) this.saveSettings(data.settings);
     if (data.regions) this.saveRegions(data.regions);
