@@ -37,6 +37,7 @@ QuarterBack pairs a lightweight capacity estimator with a tactile, quarter-aware
 ### Requirements
 - Node.js 18+ (or any runtime supported by Vite 5)
 - npm 9+ (or pnpm/yarn with equivalent scripts)
+- Supabase (optional): set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` if you want cloud sync.
 
 ### Install & run
 
@@ -59,6 +60,12 @@ Stop the server with `Ctrl+C`. Use a dedicated terminal for build/deploy command
 | `npm run build` | Produce a production bundle in `dist/` (esbuild minified). |
 | `npm run preview` | Serve the production build locally for smoke testing. |
 | `npm run deploy` | Build and publish `dist/` to the `gh-pages` branch via `gh-pages`. |
+
+### Optional: Supabase cloud sync
+- Copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+- Create tables/policies from `docs/supabase-schema.sql` (includes shared board table for read-only links).
+- Use the Supabase auth endpoints for email/password signup and session handling; the client is initialized in `src/supabaseClient.js`.
+- In the app header, click **☁️ Cloud Sync** to log in, sign up, and push/pull the current board to Supabase.
 
 ## Everyday Workflows
 

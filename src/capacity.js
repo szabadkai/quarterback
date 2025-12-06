@@ -45,14 +45,15 @@ export const CapacityCalculator = {
   /**
    * Calculate total time off for simple mode
    * @param {number} numEngineers - Number of engineers
-   * @param {number} ptoPerPerson - PTO days per person
-   * @param {Array} companyHolidays - Array of company holiday dates (not count!)
+   * @param {number} ptoPerPersonAnnual - PTO days per person (annual)
+   * @param {Array} companyHolidays - Array of company holiday dates (already filtered to quarter)
    * @returns {number} Total time off in person-days
    */
-  calculateTimeOff(numEngineers, ptoPerPerson, companyHolidays) {
+  calculateTimeOff(numEngineers, ptoPerPersonAnnual, companyHolidays) {
+    const ptoPerPersonQuarter = (ptoPerPersonAnnual ?? 0) / 4;
     const holidayCount = Array.isArray(companyHolidays) ? companyHolidays.length : 0;
     // Company holidays affect everyone, so multiply by team size
-    return numEngineers * ptoPerPerson + (numEngineers * holidayCount);
+    return numEngineers * ptoPerPersonQuarter + (numEngineers * holidayCount);
   },
 
   /**
@@ -63,10 +64,10 @@ export const CapacityCalculator = {
    * @param {number} bugPercent - Percentage for bug fixes
    * @returns {number} Total reserve days (floating point to avoid rounding errors)
    */
-  calculateReserves(availableCapacity, adhocPercent, bugPercent) {
-    const adhoc = availableCapacity * (adhocPercent / 100);
-    const bugs = availableCapacity * (bugPercent / 100);
-    return adhoc + bugs;
+  calculateReserves(baseCapacity, adhocPercent, bugPercent) {
+    const reservePercent = (adhocPercent + bugPercent) / 100;
+    const total = baseCapacity * reservePercent;
+    return total;
   },
 
   calculateNetCapacity(theoretical, timeOff, reserves) {
@@ -93,9 +94,9 @@ export const CapacityCalculator = {
         // Use floating point to avoid accumulating rounding errors
         const theoretical = workingDays * focusMultiplier;
 
-        // Time off = PTO + company holidays + regional holidays (no rounding yet)
-        const ptoDays = region.ptoDays ?? config.ptoPerPerson ?? 0;
-        const regionalHolidays = region.holidays ?? 0;
+        // Time off = PTO + company holidays + regional holidays (annual PTO/holidays scaled to quarter)
+        const ptoDays = (region.ptoDays ?? config.ptoPerPerson ?? 0) / 4;
+        const regionalHolidays = (region.holidays ?? 0) / 4;
         const timeOff = ptoDays + companyHolidayCount + regionalHolidays;
 
         const net = Math.max(0, theoretical - timeOff);
@@ -162,10 +163,11 @@ export const CapacityCalculator = {
       );
     }
 
-    // Calculate reserves on available capacity (after time off), not theoretical
+    // Calculate reserves on theoretical capacity so it scales with the number the user sees
+    const reserveBase = theoreticalCapacity;
     const availableCapacity = theoreticalCapacity - timeOffTotal;
     const reserveTotal = this.calculateReserves(
-      availableCapacity,
+      reserveBase,
       config.adhocReserve,
       config.bugReserve,
     );

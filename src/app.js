@@ -1,10 +1,12 @@
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import LZString from 'lz-string';
 import { Storage } from './storage.js';
 import { CapacityCalculator } from './capacity.js';
 import { GanttChart } from './gantt.js';
+import { SupabaseService } from './supabaseService.js';
 
-class QuarterBackApp {
+export class QuarterBackApp {
   constructor() {
     this.capacity = null;
     this.projects = [];
@@ -30,11 +32,23 @@ class QuarterBackApp {
     this.maxHistorySize = 50;
     this.selectedProjectId = null;
     this.spreadsheetInstance = null;
+    this.supabaseEnabled = SupabaseService.isEnabled();
+    this.authUser = null;
+    this.cloudStatus = this.supabaseEnabled ? 'offline' : 'disabled';
+    this.cloudStatusMessage = '';
+    this.authListener = null;
+    this.shareParam = 'share';
+    this.cloudAutoSaveTimer = null;
+    this.cloudAutoSaveDelay = 1200;
+    this.suppressCloudAutoSave = false;
+    this.lastCloudLoadAt = 0;
+    this.cloudStatusTimer = null;
   }
 
-  init() {
+  async init() {
+    const sharedApplied = await this.applyShareLinkIfPresent();
     // Check if this is a new user and load demo data
-    if (Storage.isFirstTimeUser()) {
+    if (Storage.isFirstTimeUser() && !sharedApplied) {
       Storage.initializeDemoMode();
       this.isDemoMode = true;
     } else {
@@ -45,6 +59,7 @@ class QuarterBackApp {
     this.ensureCapacityTotals();
     this.initUI();
     this.attachEventListeners();
+    this.initSupabaseAuth();
     this.updateCapacityDisplay();
     this.refreshGantt();
     
@@ -55,7 +70,12 @@ class QuarterBackApp {
   }
 
   loadData() {
-    this.capacity = Storage.loadCapacity();
+    const defaultCapacity = Storage.getDefaultCapacity();
+    this.capacity = {
+      ...defaultCapacity,
+      ...Storage.loadCapacity(),
+    };
+    Storage.saveCapacity(this.capacity);
     const storedProjects = Storage.loadProjects();
     this.projects = storedProjects.map((project, index) => {
       const normalizedAssignees = Array.isArray(project.assignees)
@@ -96,12 +116,31 @@ class QuarterBackApp {
     this.roles = Storage.loadRoles();
     this.companyHolidays = Storage.loadCompanyHolidays();
     this.team = this.normalizeTeamMembers(Storage.loadTeam());
-    Storage.saveTeam(this.team);
+    this.persistTeam();
     this.settings = Storage.loadSettings();
     if (!this.settings.theme) {
       this.settings.theme = Storage.getDefaultSettings().theme;
-      Storage.saveSettings(this.settings);
+      this.persistSettings();
     }
+    if (this.settings.viewType !== 'quarter') {
+      this.settings.viewType = 'quarter';
+      this.persistSettings();
+    }
+  }
+
+  reloadFromStorage() {
+    this.loadData();
+    this.ensureCapacityTotals();
+    this.syncQuarterSelect();
+    this.renderTeamMembersList();
+    this.renderRegionSettings();
+    this.renderRoleSettings();
+    this.populateAssigneeSelect();
+    this.populateFilterAssignees();
+    this.renderBacklog();
+    this.updateCapacityDisplay();
+    this.refreshGantt();
+    this.applyTheme(this.settings.theme);
   }
 
   normalizeTeamMembers(members = []) {
@@ -136,15 +175,13 @@ class QuarterBackApp {
           quarter: this.settings.currentQuarter,
         }, holidaysInQuarter),
       };
-      Storage.saveCapacity(this.capacity);
+      this.persistCapacity();
     }
   }
 
   initUI() {
     this.syncQuarterSelect();
-    const viewSelect = document.getElementById('viewTypeSelect');
     const groupSelect = document.getElementById('groupBySelect');
-    if (viewSelect) viewSelect.value = this.settings.viewType;
     if (groupSelect) groupSelect.value = this.settings.groupBy;
     this.renderTeamMembersList();
     this.renderRegionSettings();
@@ -227,22 +264,51 @@ class QuarterBackApp {
 
   attachEventListeners() {
     document.getElementById('capacityBtn')?.addEventListener('click', () => this.openCapacityModal());
-    document.getElementById('exportBtn')?.addEventListener('click', () => this.openExportModal());
-    document.getElementById('shareBtn')?.addEventListener('click', () => this.shareView());
+    document.getElementById('accountExportBtn')?.addEventListener('click', () => {
+      this.closeAccountMenu();
+      this.openExportModal();
+    });
+    document.getElementById('accountImportBtn')?.addEventListener('click', () => {
+      this.closeAccountMenu();
+      this.openImportModal();
+    });
+    document.getElementById('accountShareBtn')?.addEventListener('click', () => {
+      this.closeAccountMenu();
+      this.shareView();
+    });
     document.getElementById('themeSelect')?.addEventListener('change', (event) => this.changeTheme(event.target.value));
     document.getElementById('addProjectBtn')?.addEventListener('click', () => this.openProjectModal());
     document.getElementById('setupCapacityBtn')?.addEventListener('click', () => this.openCapacityModal());
     document.getElementById('addFirstProjectBtn')?.addEventListener('click', () => this.openProjectModal());
     document.getElementById('autoAllocateBtn')?.addEventListener('click', () => this.autoAllocateBacklog());
     document.getElementById('resetBoardBtn')?.addEventListener('click', () => this.resetBoardToBacklog());
-    document.getElementById('importBtn')?.addEventListener('click', () => this.openImportModal());
+    document.getElementById('authBtn')?.addEventListener('click', () => {
+      this.toggleAccountMenu();
+    });
+    document.getElementById('accountLoginBtn')?.addEventListener('click', () => {
+      this.closeAccountMenu();
+      this.openAuthModal();
+    });
+    document.getElementById('accountSyncNowBtn')?.addEventListener('click', () => this.saveCloudState({ reason: 'manual' }));
+    document.getElementById('accountRefreshBtn')?.addEventListener('click', async () => {
+      const payload = await this.loadCloudState({ silent: true });
+      if (payload) {
+        this.showToast('Cloud data refreshed', 'success');
+      }
+    });
+    document.getElementById('accountSignOutBtn')?.addEventListener('click', () => this.handleAuthSignOut());
+    document.addEventListener('click', (event) => {
+      const menu = document.getElementById('accountMenu');
+      if (menu && !menu.contains(event.target)) {
+        this.closeAccountMenu();
+      }
+    });
+    document.getElementById('closeAuthModal')?.addEventListener('click', () => this.closeAuthModal());
+    document.getElementById('authLoginBtn')?.addEventListener('click', () => this.handleAuthLogin());
+    document.getElementById('authSignupBtn')?.addEventListener('click', () => this.handleAuthSignup());
 
     document.getElementById('quarterSelect')?.addEventListener('change', (event) => {
       this.changeQuarter(event.target.value);
-    });
-
-    document.getElementById('viewTypeSelect')?.addEventListener('change', (event) => {
-      this.changeView(event.target.value);
     });
 
     document.getElementById('groupBySelect')?.addEventListener('change', (event) => {
@@ -252,25 +318,9 @@ class QuarterBackApp {
     document.getElementById('searchInput')?.addEventListener('input', (event) => {
       this.searchProjects(event.target.value);
     });
-
-    document.getElementById('filterStatus')?.addEventListener('change', (event) => {
-      this.filterStatus = event.target.value;
-      this.refreshGantt();
-    });
-
-    document.getElementById('filterAssignee')?.addEventListener('change', (event) => {
-      this.filterAssignee = event.target.value;
-      this.refreshGantt();
-    });
-
-    document.getElementById('filterType')?.addEventListener('change', (event) => {
-      this.filterType = event.target.value;
-      this.refreshGantt();
-    });
-
-    document.getElementById('clearFiltersBtn')?.addEventListener('click', () => {
-      this.clearAllFilters();
-    });
+    this.filterStatus = '';
+    this.filterAssignee = '';
+    this.filterType = '';
 
     document.getElementById('closeCapacityModal')?.addEventListener('click', () => this.closeCapacityModal());
     document.getElementById('cancelCapacityBtn')?.addEventListener('click', () => this.closeCapacityModal());
@@ -345,8 +395,16 @@ class QuarterBackApp {
     const engineersInput = document.getElementById('numEngineers');
     if (engineersInput) engineersInput.value = this.capacity.numEngineers ?? this.team.length;
     document.getElementById('ptoPerPerson').value = this.capacity.ptoPerPerson;
-    document.getElementById('adhocReserve').value = this.capacity.adhocReserve;
-    document.getElementById('bugReserve').value = this.capacity.bugReserve;
+    const adhocSelect = document.getElementById('adhocReserve');
+    const bugSelect = document.getElementById('bugReserve');
+    if (adhocSelect) {
+      adhocSelect.value = String(this.capacity.adhocReserve ?? 20);
+      if (!adhocSelect.value) adhocSelect.value = '20';
+    }
+    if (bugSelect) {
+      bugSelect.value = String(this.capacity.bugReserve ?? 10);
+      if (!bugSelect.value) bugSelect.value = '10';
+    }
     
     // Update company holidays count display
     this.updateCompanyHolidaysCount();
@@ -358,6 +416,341 @@ class QuarterBackApp {
 
   closeCapacityModal() {
     document.getElementById('capacityModal')?.classList.remove('active');
+  }
+
+  openAuthModal() {
+    this.renderAuthState();
+    this.updateCloudStatusBadge();
+    this.closeAccountMenu();
+    document.getElementById('authModal')?.classList.add('active');
+  }
+
+  closeAuthModal() {
+    document.getElementById('authModal')?.classList.remove('active');
+  }
+
+  toggleAccountMenu(forceState) {
+    const menu = document.getElementById('accountMenu');
+    const dropdown = document.getElementById('accountDropdown');
+    const trigger = document.getElementById('authBtn');
+    if (!menu || !dropdown || !trigger) return;
+    const nextState = typeof forceState === 'boolean' ? forceState : !menu.classList.contains('open');
+    menu.classList.toggle('open', nextState);
+    trigger.setAttribute('aria-expanded', String(nextState));
+  }
+
+  closeAccountMenu() {
+    this.toggleAccountMenu(false);
+  }
+
+  getAuthDisplayName() {
+    return this.authUser?.user_metadata?.display_name || this.authUser?.email || 'Account';
+  }
+
+  queueCloudAutoSave(message = 'Syncing changes…') {
+    if (this.suppressCloudAutoSave) return;
+    if (!this.supabaseEnabled || !this.authUser) return;
+    clearTimeout(this.cloudAutoSaveTimer);
+    this.setCloudStatus('saving', message);
+    this.cloudAutoSaveTimer = window.setTimeout(() => {
+      this.saveCloudState({ silent: true, reason: 'auto' });
+    }, this.cloudAutoSaveDelay);
+  }
+
+  persistProjects() {
+    Storage.saveProjects(this.projects);
+    this.queueCloudAutoSave('Syncing projects…');
+  }
+
+  persistTeam() {
+    Storage.saveTeam(this.team);
+    this.queueCloudAutoSave('Syncing team…');
+  }
+
+  persistSettings() {
+    Storage.saveSettings(this.settings);
+    this.queueCloudAutoSave('Syncing settings…');
+  }
+
+  persistCapacity() {
+    Storage.saveCapacity(this.capacity);
+    this.queueCloudAutoSave('Syncing capacity…');
+  }
+
+  persistRegions() {
+    Storage.saveRegions(this.regions);
+    this.queueCloudAutoSave('Syncing settings…');
+  }
+
+  persistRoles() {
+    Storage.saveRoles(this.roles);
+    this.queueCloudAutoSave('Syncing settings…');
+  }
+
+  persistCompanyHolidays() {
+    Storage.saveCompanyHolidays(this.companyHolidays);
+    this.queueCloudAutoSave('Syncing settings…');
+  }
+
+  setCloudStatus(status, message = '') {
+    this.cloudStatus = status;
+    this.cloudStatusMessage = message;
+    if (this.cloudStatusTimer) {
+      clearTimeout(this.cloudStatusTimer);
+      this.cloudStatusTimer = null;
+    }
+    if (status === 'loading') {
+      this.cloudStatusTimer = window.setTimeout(() => {
+        if (this.cloudStatus === 'loading') {
+          this.cloudStatus = 'offline';
+          this.cloudStatusMessage = 'Connection timed out';
+          this.updateCloudStatusBadge();
+        }
+      }, 10000);
+    }
+    this.updateCloudStatusBadge();
+  }
+
+  updateCloudStatusBadge() {
+    const labels = {
+      disabled: 'Disabled',
+      offline: 'Offline',
+      loading: 'Connecting…',
+      saving: 'Saving…',
+      saved: 'Saved',
+      error: 'Error',
+    };
+    const label = labels[this.cloudStatus] || 'Unknown';
+    const badge = document.getElementById('cloudStatusBadge');
+    const accountStatus = document.getElementById('accountMenuStatus');
+    const syncHint = document.getElementById('accountSyncHint');
+    const trigger = document.getElementById('accountMenu');
+    [badge].forEach((el) => {
+      if (!el) return;
+      el.textContent = `Cloud: ${label}`;
+      el.dataset.state = this.cloudStatus;
+    });
+    const statusMessage = document.getElementById('authStatusMessage');
+    if (statusMessage) {
+      statusMessage.textContent = this.cloudStatusMessage || '';
+    }
+    if (accountStatus) {
+      accountStatus.textContent = this.cloudStatusMessage || `Cloud: ${label}`;
+    }
+    if (syncHint) {
+      syncHint.textContent = this.authUser ? 'Auto-sync enabled for this board' : 'Sign in to enable cloud sync';
+    }
+    if (trigger) {
+      trigger.dataset.state = this.cloudStatus;
+    }
+  }
+
+  renderAuthState() {
+    const missing = document.getElementById('authConfigMissing');
+    const loggedOut = document.getElementById('authLoggedOut');
+    const accountLoggedIn = document.getElementById('accountMenuLoggedIn');
+    const accountLoggedOut = document.getElementById('accountMenuLoggedOut');
+    const accountEmail = document.getElementById('accountMenuEmail');
+    const accountStatus = document.getElementById('accountMenuStatus');
+    const accountAvatar = document.getElementById('accountAvatar');
+    const enabled = SupabaseService.isEnabled();
+    this.supabaseEnabled = enabled;
+    if (missing) missing.style.display = enabled ? 'none' : 'block';
+    if (!enabled) {
+      if (loggedOut) loggedOut.style.display = 'none';
+      if (accountLoggedOut) accountLoggedOut.style.display = 'none';
+      if (accountLoggedIn) accountLoggedIn.style.display = 'none';
+      if (accountEmail) accountEmail.textContent = 'Cloud sync unavailable';
+      if (accountStatus) accountStatus.textContent = 'Set Supabase env vars to enable sync.';
+      if (accountAvatar) accountAvatar.textContent = '☁️';
+      this.setCloudStatus('disabled', 'Set Supabase env vars to enable sync.');
+      return;
+    }
+    if (this.authUser) {
+      const display = this.getAuthDisplayName();
+      const initials = this.getInitials(display);
+      if (loggedOut) loggedOut.style.display = 'none';
+      if (accountLoggedOut) accountLoggedOut.style.display = 'none';
+      if (accountLoggedIn) accountLoggedIn.style.display = 'flex';
+      if (accountEmail) accountEmail.textContent = display;
+      if (accountStatus) accountStatus.textContent = 'Auto-sync is on';
+      if (accountAvatar) accountAvatar.textContent = initials || '🙌';
+    } else {
+      if (loggedOut) loggedOut.style.display = 'block';
+      if (accountLoggedOut) accountLoggedOut.style.display = 'flex';
+      if (accountLoggedIn) accountLoggedIn.style.display = 'none';
+      if (accountEmail) accountEmail.textContent = 'Not signed in';
+      if (accountStatus) accountStatus.textContent = 'Connect to sync your board';
+      if (accountAvatar) accountAvatar.textContent = '☁️';
+    }
+  }
+
+  async initSupabaseAuth() {
+    this.renderAuthState();
+    this.updateCloudStatusBadge();
+    if (!this.supabaseEnabled) return;
+
+    const { data, error } = await SupabaseService.getSession();
+    if (error) {
+      this.setCloudStatus('error', 'Unable to check session');
+    }
+    if (data?.session?.user) {
+      this.authUser = data.session.user;
+      this.setCloudStatus('saved', 'Session active');
+      this.renderAuthState();
+      this.closeAuthModal();
+      await this.loadCloudState({ silent: true });
+    }
+
+    const { data: listener } = SupabaseService.onAuthStateChange(async (event, session) => {
+      this.authUser = session?.user ?? null;
+      if (event === 'SIGNED_IN') {
+        this.setCloudStatus('saved', 'Signed in');
+        this.renderAuthState();
+        this.closeAuthModal();
+        this.closeAccountMenu();
+        const recentlyLoaded = Date.now() - this.lastCloudLoadAt < 2000;
+        if (!recentlyLoaded) {
+          await this.loadCloudState({ silent: true });
+        }
+      }
+      if (event === 'SIGNED_OUT') {
+        this.setCloudStatus('offline', 'Signed out');
+        this.closeAccountMenu();
+        this.showToast('Signed out', 'success');
+      }
+      this.renderAuthState();
+    });
+    this.authListener = listener;
+  }
+
+  async handleAuthLogin() {
+    if (!this.supabaseEnabled) {
+      this.showToast('Cloud sync not configured', 'error');
+      return;
+    }
+    const email = document.getElementById('authEmail')?.value?.trim();
+    const password = document.getElementById('authPassword')?.value;
+    if (!email || !password) {
+      this.showToast('Enter email and password', 'error');
+      return;
+    }
+    this.setCloudStatus('loading', 'Signing in…');
+    const { data, error } = await SupabaseService.signIn({ email, password });
+    if (error) {
+      this.setCloudStatus('error', error.message);
+      this.showToast(error.message || 'Unable to sign in', 'error');
+      return;
+    }
+    this.authUser = data?.session?.user ?? this.authUser;
+    this.setCloudStatus('saved', 'Signed in');
+    await this.loadCloudState({ silent: true });
+    this.renderAuthState();
+    this.closeAuthModal();
+    this.closeAccountMenu();
+    this.showToast('Signed in', 'success');
+  }
+
+  async handleAuthSignup() {
+    if (!this.supabaseEnabled) {
+      this.showToast('Cloud sync not configured', 'error');
+      return;
+    }
+    const email = document.getElementById('authEmail')?.value?.trim();
+    const password = document.getElementById('authPassword')?.value;
+    const displayName = document.getElementById('authDisplayName')?.value?.trim() || undefined;
+    if (!email || !password) {
+      this.showToast('Enter email and password', 'error');
+      return;
+    }
+    this.setCloudStatus('loading', 'Signing up…');
+    const { error } = await SupabaseService.signUp({ email, password, displayName });
+    if (error) {
+      this.setCloudStatus('error', error.message);
+      this.showToast(error.message || 'Unable to sign up', 'error');
+      return;
+    }
+    const { error: profileError } = await SupabaseService.upsertProfile({ email, displayName });
+    if (profileError) {
+      console.warn('Unable to upsert profile', profileError);
+    }
+    this.setCloudStatus('saved', 'Check your inbox to confirm email');
+    this.showToast('Sign-up started. Confirm email to finish.', 'success');
+  }
+
+  async handleAuthSignOut() {
+    if (!this.supabaseEnabled) return;
+    clearTimeout(this.cloudAutoSaveTimer);
+    await SupabaseService.signOut();
+    this.authUser = null;
+    this.setCloudStatus('offline', 'Signed out');
+    this.renderAuthState();
+    this.closeAccountMenu();
+    this.showToast('Signed out', 'success');
+  }
+
+  async loadCloudState(options = {}) {
+    const { silent = false } = options;
+    if (!this.supabaseEnabled) return null;
+    if (!this.authUser) {
+      if (!silent) this.showToast('Sign in to load cloud data', 'error');
+      return null;
+    }
+    this.setCloudStatus('loading', 'Fetching cloud state…');
+    const { data, error } = await SupabaseService.fetchLatestState();
+    if (error) {
+      this.setCloudStatus('error', error.message);
+      if (!silent) this.showToast('Could not load cloud data', 'error');
+      return null;
+    }
+    if (!data?.payload) {
+      this.setCloudStatus('saved', 'No cloud data yet');
+      if (!silent) this.showToast('No cloud data found', 'success');
+      return null;
+    }
+    let shouldApply = true;
+    if (!silent) {
+      shouldApply = window.confirm('Load cloud data? This will replace local data.');
+    }
+    if (shouldApply) {
+      this.suppressCloudAutoSave = true;
+      try {
+        Storage.importData(data.payload);
+        this.reloadFromStorage();
+      } finally {
+        this.suppressCloudAutoSave = false;
+      }
+      this.lastCloudLoadAt = Date.now();
+      this.setCloudStatus('saved', 'Loaded from cloud');
+      if (!silent) this.showToast('Cloud data loaded', 'success');
+      return data.payload;
+    }
+    this.setCloudStatus('saved');
+    return null;
+  }
+
+  async saveCloudState(options = {}) {
+    const { silent = false, reason = 'manual' } = options;
+    if (!this.supabaseEnabled) {
+      if (!silent) this.showToast('Cloud sync not configured', 'error');
+      return;
+    }
+    if (!this.authUser) {
+      if (!silent) this.showToast('Sign in to save to cloud', 'error');
+      return;
+    }
+    const savingMessage = reason === 'auto' ? 'Syncing changes…' : 'Saving to cloud…';
+    this.setCloudStatus('saving', savingMessage);
+    const payload = Storage.exportData();
+    const { error } = await SupabaseService.saveState(payload);
+    if (error) {
+      this.setCloudStatus('error', error.message);
+      if (!silent) this.showToast('Could not save to cloud', 'error');
+      return;
+    }
+    const savedMessage = reason === 'auto' ? 'Synced just now' : 'Saved to cloud';
+    this.setCloudStatus('saved', savedMessage);
+    if (!silent) this.showToast('Cloud save complete', 'success');
   }
 
   getAvailableThemes() {
@@ -411,7 +804,7 @@ class QuarterBackApp {
     const themes = this.getAvailableThemes();
     const themeInfo = themes.find(t => t.id === themeId) || themes[0];
     this.applyTheme(themeInfo.id);
-    Storage.saveSettings(this.settings);
+    this.persistSettings();
     this.showToast(`${themeInfo.name} theme applied`, 'success');
   }
 
@@ -420,7 +813,7 @@ class QuarterBackApp {
     if (!list) return;
     if (!this.team.length) {
       this.team = this.normalizeTeamMembers(Storage.getDefaultTeam());
-      Storage.saveTeam(this.team);
+      this.persistTeam();
       this.populateAssigneeSelect();
     }
 
@@ -509,7 +902,7 @@ class QuarterBackApp {
     if (!container) return;
     if (!this.regions.length) {
       this.regions = Storage.getDefaultRegions();
-      Storage.saveRegions(this.regions);
+      this.persistRegions();
     }
 
     container.innerHTML = this.regions
@@ -544,7 +937,7 @@ class QuarterBackApp {
     if (!container) return;
     if (!this.roles.length) {
       this.roles = Storage.getDefaultRoles();
-      Storage.saveRoles(this.roles);
+      this.persistRoles();
     }
 
     container.innerHTML = this.roles
@@ -711,7 +1104,7 @@ class QuarterBackApp {
       return;
     }
 
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
 
@@ -1072,7 +1465,7 @@ class QuarterBackApp {
     };
 
     this.projects[index] = updated;
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.renderBacklog();
@@ -1106,7 +1499,7 @@ class QuarterBackApp {
       assignees: clearAssignees ? [] : Array.isArray(project.assignees) ? project.assignees : [],
     };
     this.projects[index] = updated;
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.renderBacklog();
@@ -1126,7 +1519,7 @@ class QuarterBackApp {
       endDate: '',
       assignees: [],
     }));
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.renderBacklog();
@@ -1375,7 +1768,7 @@ class QuarterBackApp {
   addRegion() {
     const id = Date.now();
     this.regions.push({ id, name: 'New Region', ptoDays: 10, holidays: 5 });
-    Storage.saveRegions(this.regions);
+    this.persistRegions();
     this.renderRegionSettings();
     this.recalculateCapacity();
     this.renderTeamMembersList();
@@ -1384,7 +1777,7 @@ class QuarterBackApp {
   addRole() {
     const id = Date.now();
     this.roles.push({ id, name: 'New Role', focus: 100 });
-    Storage.saveRoles(this.roles);
+    this.persistRoles();
     this.renderRoleSettings();
     this.recalculateCapacity();
     this.renderTeamMembersList();
@@ -1400,7 +1793,7 @@ class QuarterBackApp {
       return;
     }
     this.regions = this.regions.filter((region) => region.id !== id);
-    Storage.saveRegions(this.regions);
+    this.persistRegions();
     this.renderRegionSettings();
     this.recalculateCapacity();
   }
@@ -1415,7 +1808,7 @@ class QuarterBackApp {
       return;
     }
     this.roles = this.roles.filter((role) => role.id !== id);
-    Storage.saveRoles(this.roles);
+    this.persistRoles();
     this.renderRoleSettings();
     this.recalculateCapacity();
   }
@@ -1429,7 +1822,7 @@ class QuarterBackApp {
       }
       return { ...region, [field]: value };
     });
-    Storage.saveRegions(this.regions);
+    this.persistRegions();
     this.renderTeamMembersList();
     this.recalculateCapacity();
   }
@@ -1443,7 +1836,7 @@ class QuarterBackApp {
       }
       return { ...role, [field]: value };
     });
-    Storage.saveRoles(this.roles);
+    this.persistRoles();
     this.renderTeamMembersList();
     this.recalculateCapacity();
   }
@@ -1483,7 +1876,7 @@ class QuarterBackApp {
       color: this.generateMemberColor(memberName),
     };
     this.team.push(member);
-    Storage.saveTeam(this.team);
+    this.persistTeam();
     const engineersInput = document.getElementById('numEngineers');
     if (engineersInput) engineersInput.value = this.team.length;
     this.populateAssigneeSelect();
@@ -1507,8 +1900,8 @@ class QuarterBackApp {
         assignees: assignees.filter((assigneeId) => assigneeId !== id),
       };
     });
-    Storage.saveProjects(this.projects);
-    Storage.saveTeam(this.team);
+    this.persistProjects();
+    this.persistTeam();
     this.populateAssigneeSelect();
     this.renderTeamMembersList();
     this.updateCapacityDisplay();
@@ -1580,7 +1973,7 @@ class QuarterBackApp {
     }
     
     member.ptoDates.push(dateStr);
-    Storage.saveTeam(this.team);
+    this.persistTeam();
     this.renderPtoDates(member.ptoDates);
     this.renderTeamMembersList();
     input.value = '';
@@ -1592,7 +1985,7 @@ class QuarterBackApp {
     if (!member || !Array.isArray(member.ptoDates)) return;
     
     member.ptoDates = member.ptoDates.filter((d) => d !== dateStr);
-    Storage.saveTeam(this.team);
+    this.persistTeam();
     this.renderPtoDates(member.ptoDates);
     this.renderTeamMembersList();
   }
@@ -1668,7 +2061,7 @@ class QuarterBackApp {
       member.typePreferences[typeValue] = preference;
     }
     
-    Storage.saveTeam(this.team);
+    this.persistTeam();
   }
 
   saveTypePreferences() {
@@ -1706,7 +2099,7 @@ class QuarterBackApp {
     
     // Save country code to settings
     this.settings.countryCode = countryCode;
-    Storage.saveSettings(this.settings);
+    this.persistSettings();
     
     // Disable button during fetch
     if (fetchBtn) {
@@ -1751,7 +2144,7 @@ class QuarterBackApp {
       if (addedCount === 0) {
         this.showToast('All holidays already exist', 'success');
       } else {
-        Storage.saveCompanyHolidays(this.companyHolidays);
+        this.persistCompanyHolidays();
         this.renderCompanyHolidays();
         this.showToast(`Added ${addedCount} public holiday${addedCount !== 1 ? 's' : ''}`, 'success');
       }
@@ -1827,7 +2220,7 @@ class QuarterBackApp {
     }
     
     this.companyHolidays.push({ date: dateStr, name });
-    Storage.saveCompanyHolidays(this.companyHolidays);
+    this.persistCompanyHolidays();
     this.renderCompanyHolidays();
     dateInput.value = '';
     if (nameInput) nameInput.value = '';
@@ -1836,7 +2229,7 @@ class QuarterBackApp {
 
   removeCompanyHoliday(dateStr) {
     this.companyHolidays = this.companyHolidays.filter((h) => h.date !== dateStr);
-    Storage.saveCompanyHolidays(this.companyHolidays);
+    this.persistCompanyHolidays();
     this.renderCompanyHolidays();
   }
 
@@ -2046,7 +2439,7 @@ class QuarterBackApp {
     // Save changes
     this.pushUndoState('spreadsheet edit');
     this.projects = updatedProjects;
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.renderBacklog();
@@ -2075,7 +2468,7 @@ class QuarterBackApp {
           color: this.generateMemberColor(trimmed || member.name),
         }
       : member));
-    Storage.saveTeam(this.team);
+    this.persistTeam();
     this.populateAssigneeSelect();
     this.refreshGantt();
   }
@@ -2086,7 +2479,7 @@ class QuarterBackApp {
       return;
     }
     this.team = this.team.map((member) => (member.id === id ? { ...member, regionId } : member));
-    Storage.saveTeam(this.team);
+    this.persistTeam();
     this.recalculateCapacity();
   }
 
@@ -2096,7 +2489,7 @@ class QuarterBackApp {
       return;
     }
     this.team = this.team.map((member) => (member.id === id ? { ...member, roleId } : member));
-    Storage.saveTeam(this.team);
+    this.persistTeam();
     this.recalculateCapacity();
   }
 
@@ -2173,7 +2566,7 @@ class QuarterBackApp {
       ...config,
       ...result,
     };
-    Storage.saveCapacity(this.capacity);
+    this.persistCapacity();
     this.updateTeamSize(this.capacity.numEngineers);
     this.populateAssigneeSelect();
     this.updateCapacityDisplay();
@@ -2210,10 +2603,10 @@ class QuarterBackApp {
             ),
           };
         });
-        Storage.saveProjects(this.projects);
+        this.persistProjects();
       }
     }
-    Storage.saveTeam(this.team);
+    this.persistTeam();
   }
 
   updateCapacityDisplay() {
@@ -2571,7 +2964,7 @@ class QuarterBackApp {
       );
     }
 
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.closeProjectModal();
@@ -2671,7 +3064,7 @@ class QuarterBackApp {
     this.pushUndoState(`move ${project.name}`);
 
     this.projects[index] = next;
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
 
@@ -2796,7 +3189,7 @@ class QuarterBackApp {
     if (!window.confirm('Are you sure you want to delete this project?')) return;
     this.pushUndoState(`delete ${this.currentProject.name}`);
     this.projects = this.projects.filter((project) => project.id !== this.currentProject.id);
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.closeProjectModal();
@@ -3335,7 +3728,7 @@ class QuarterBackApp {
     }).filter(p => p.name);
     
     this.projects = [...this.projects, ...projects];
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.reloadFromStorage();
   }
 
@@ -3394,7 +3787,7 @@ class QuarterBackApp {
     }).filter(p => p.name);
     
     this.projects = [...this.projects, ...projects];
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.reloadFromStorage();
   }
 
@@ -3494,7 +3887,7 @@ class QuarterBackApp {
       throw new Error('CSV did not contain any valid projects');
     }
     this.projects = [...this.projects, ...normalizedProjects];
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.reloadFromStorage();
   }
 
@@ -3591,38 +3984,150 @@ class QuarterBackApp {
     URL.revokeObjectURL(url);
   }
 
+  createSharePayload() {
+    return {
+      v: 1,
+      exportedAt: new Date().toISOString(),
+      data: Storage.exportData(),
+    };
+  }
+
+  generateShareLink({ shareId, payloadOverride } = {}) {
+    if (shareId) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('shareId', shareId);
+      url.hash = '';
+      return url.toString();
+    }
+    const payload = payloadOverride || this.createSharePayload();
+    const json = JSON.stringify(payload);
+    const encoded = LZString.compressToEncodedURIComponent(json);
+    const url = new URL(window.location.href);
+    url.searchParams.set(this.shareParam, encoded);
+    url.hash = '';
+    return url.toString();
+  }
+
+  async applyShareLinkIfPresent() {
+    if (typeof window === 'undefined') return false;
+    const url = new URL(window.location.href);
+    const shareId = url.searchParams.get('shareId');
+    if (shareId && this.supabaseEnabled) {
+      this.setCloudStatus('loading', 'Loading shared board…');
+      const { data, error } = await SupabaseService.fetchSharedBoard(shareId);
+      url.searchParams.delete('shareId');
+      window.history.replaceState({}, '', url.toString());
+      if (error) {
+        console.warn('Unable to load shared board', error);
+        if (error.code === 'MISSING_TABLE') {
+          this.showToast('Shared boards table missing; run docs/supabase-schema.sql', 'error');
+          this.setCloudStatus('error', 'Shared boards table missing');
+        } else {
+          this.setCloudStatus('error', 'Unable to load shared board');
+        }
+        return false;
+      }
+      if (data?.payload) {
+        const confirmed = window.confirm('Load shared board? This replaces your current local data.');
+        if (confirmed) {
+          Storage.importData(data.payload);
+          return true;
+        }
+      }
+      this.setCloudStatus('offline');
+      return false;
+    }
+
+    const encoded = url.searchParams.get(this.shareParam);
+    if (!encoded) return false;
+    let payload;
+    try {
+      const decoded = LZString.decompressFromEncodedURIComponent(encoded);
+      payload = decoded ? JSON.parse(decoded) : null;
+    } catch (error) {
+      console.warn('Invalid share payload', error);
+      url.searchParams.delete(this.shareParam);
+      window.history.replaceState({}, '', url.toString());
+      return false;
+    }
+
+    const confirmed = window.confirm('Apply the shared board? This replaces your current local data.');
+    url.searchParams.delete(this.shareParam);
+    window.history.replaceState({}, '', url.toString());
+    if (!confirmed) return false;
+
+    if (payload?.data) {
+      Storage.importData(payload.data);
+      return true;
+    }
+    return false;
+  }
+
   shareView() {
-    const url = window.location.href;
+    if (this.supabaseEnabled && this.authUser) {
+      this.shareCloudBoard();
+      return;
+    }
+    const link = this.generateShareLink();
     if (navigator.clipboard?.writeText) {
       navigator.clipboard
-        .writeText(url)
-        .then(() => {
-          this.showToast('Link copied to clipboard!', 'success');
-        })
-        .catch(() => {
-          this.showToast('Unable to copy link', 'error');
-        });
+        .writeText(link)
+        .then(() => this.showToast('Share link copied!', 'success'))
+        .catch(() => this.showToast('Unable to copy link', 'error'));
     } else {
-      this.showToast('Clipboard not supported in this browser', 'error');
+      window.prompt('Copy this link to share the board:', link);
+    }
+  }
+
+  async shareCloudBoard() {
+    if (!this.supabaseEnabled || !this.authUser) {
+      return this.shareView();
+    }
+    this.setCloudStatus('saving', 'Creating share link…');
+    const payload = Storage.exportData();
+    await SupabaseService.saveState(payload);
+    const { data, error } = await SupabaseService.createSharedBoard(payload);
+    if (error || !data?.id) {
+      if (error?.code === 'MISSING_TABLE') {
+        this.setCloudStatus('error', 'Shared boards table missing');
+        const fallbackLink = this.generateShareLink();
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(fallbackLink);
+        }
+        this.showToast('Shared boards table missing; using local share link. Apply docs/supabase-schema.sql.', 'error');
+        return;
+      }
+      this.setCloudStatus('error', 'Unable to create cloud share link');
+      this.showToast('Could not create cloud share link', 'error');
+      return;
+    }
+    const link = this.generateShareLink({ shareId: data.id });
+    this.setCloudStatus('saved', 'Share ready');
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(link)
+        .then(() => this.showToast('Cloud share link copied!', 'success'))
+        .catch(() => this.showToast('Copy failed', 'error'));
+    } else {
+      window.prompt('Copy this cloud link:', link);
     }
   }
 
   changeView(viewType) {
-    this.settings.viewType = viewType;
-    Storage.saveSettings(this.settings);
+    this.settings.viewType = 'quarter';
+    this.persistSettings();
     this.refreshGantt();
-    this.showToast(`Switched to ${viewType} view`, 'success');
   }
 
   changeGrouping(groupBy) {
     this.settings.groupBy = groupBy;
-    Storage.saveSettings(this.settings);
+    this.persistSettings();
     this.showToast(`Grouped by ${groupBy}`, 'success');
   }
 
   changeQuarter(quarter) {
     this.settings.currentQuarter = quarter;
-    Storage.saveSettings(this.settings);
+    this.persistSettings();
     const quarterRange = GanttChart.getQuarterRange(quarter);
     const holidaysInQuarter = this.getCompanyHolidayDatesInRange(quarterRange.start, quarterRange.end);
     this.capacity = {
@@ -3635,7 +4140,7 @@ class QuarterBackApp {
         quarter: this.settings.currentQuarter,
       }, holidaysInQuarter),
     };
-    Storage.saveCapacity(this.capacity);
+    this.persistCapacity();
     this.syncQuarterSelect();
     this.updateCapacityDisplay();
     this.refreshGantt();
@@ -3953,7 +4458,7 @@ class QuarterBackApp {
     const prev = this.undoStack.pop();
     this.redoStack.push({ snapshot: currentSnapshot, label: prev.label });
     this.projects = JSON.parse(prev.snapshot);
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.showToast(`Undo: ${prev.label}`, 'success');
@@ -3968,7 +4473,7 @@ class QuarterBackApp {
     const next = this.redoStack.pop();
     this.undoStack.push({ snapshot: currentSnapshot, label: next.label });
     this.projects = JSON.parse(next.snapshot);
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     this.showToast(`Redo: ${next.label}`, 'success');
@@ -3995,7 +4500,7 @@ class QuarterBackApp {
     if (!project) return;
     this.pushUndoState(`delete ${project.name}`);
     this.projects = this.projects.filter((p) => p.id !== this.selectedProjectId);
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.clearSelection();
     this.updateCapacityDisplay();
     this.refreshGantt();
@@ -4020,7 +4525,7 @@ class QuarterBackApp {
       startDate: this.formatDateInput(start),
       endDate: this.formatDateInput(end),
     };
-    Storage.saveProjects(this.projects);
+    this.persistProjects();
     this.updateCapacityDisplay();
     this.refreshGantt();
     // Re-select after refresh
@@ -4084,3 +4589,4 @@ class QuarterBackApp {
 }
 
 export const App = new QuarterBackApp();
+export default App;

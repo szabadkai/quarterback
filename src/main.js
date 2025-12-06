@@ -1,5 +1,5 @@
 import './style.css'
-import { App } from './app.js'
+import App, { QuarterBackApp } from './app.js'
 
 const mount = document.querySelector('#app')
 
@@ -9,8 +9,11 @@ if (!mount) {
 
 mount.innerHTML = getAppTemplate()
 
-window.App = App
-App.init()
+const app = App instanceof QuarterBackApp ? App : new QuarterBackApp()
+window.App = app
+;(async () => {
+  await app.init()
+})()
 
 function getAppTemplate() {
   return `
@@ -28,23 +31,55 @@ function getAppTemplate() {
               <option value="Q1-2025">Q1 2025</option>
               <option value="Q2-2025">Q2 2025</option>
             </select>
-            <button id="capacityBtn" class="btn btn-secondary" aria-label="Open capacity planning tool">⚙️ Capacity Tool</button>
-            <button id="exportBtn" class="btn btn-secondary" aria-label="Export data">📥 Export</button>
-            <button id="importBtn" class="btn btn-secondary" aria-label="Import data">📤 Import</button>
-            <button id="shareBtn" class="btn btn-secondary" aria-label="Share project">🔗 Share</button>
-            <select id="themeSelect" class="theme-select" aria-label="Select color theme">
-              <option value="light">☀️ Light (Default)</option>
-              <option value="github-light">☀️ GitHub Light</option>
-              <option value="solarized-light">☀️ Solarized Light</option>
-              <option value="quiet-light">☀️ Quiet Light</option>
-              <option value="monokai">🌙 Monokai</option>
-              <option value="one-dark-pro">🌙 One Dark Pro</option>
-              <option value="dracula">🌙 Dracula</option>
-              <option value="github-dark">🌙 GitHub Dark</option>
-              <option value="nord">🌙 Nord</option>
-              <option value="solarized-dark">🌙 Solarized Dark</option>
-              <option value="night-owl">🌙 Night Owl</option>
-            </select>
+            <button id="spreadsheetBtn" class="btn btn-secondary" title="Edit all projects in spreadsheet view">📋 Table View</button>
+            <button id="capacityBtn" class="btn btn-secondary" aria-label="Open capacity planning tool">⚙️ Capacity</button>
+            <div class="header-search">
+              <input type="text" id="searchInput" placeholder="Search projects..." class="search-input" aria-label="Search projects" />
+            </div>
+            <div class="account-menu" id="accountMenu">
+              <button id="authBtn" class="account-avatar account-trigger" aria-label="Open account menu" aria-expanded="false">
+                <span id="accountAvatar" aria-hidden="true">☁️</span>
+              </button>
+              <div class="account-dropdown" id="accountDropdown" role="menu">
+                <div class="account-dropdown-header">
+                  <div>
+                    <div class="account-email" id="accountMenuEmail">Not signed in</div>
+                    <div class="account-subtext" id="accountMenuStatus">Connect to sync your board</div>
+                  </div>
+                  <span id="cloudStatusBadge" class="cloud-chip cloud-chip-compact">Cloud: Offline</span>
+                </div>
+                <div class="account-actions" id="accountMenuLoggedOut">
+                  <button class="btn btn-primary btn-block" id="accountLoginBtn" type="button">Log in or sign up</button>
+                </div>
+                <div class="account-actions" id="accountMenuLoggedIn" style="display: none;">
+                  <p class="form-hint" id="accountSyncHint">Auto-sync enabled for this board</p>
+                  <button class="btn btn-primary btn-block" id="accountSyncNowBtn" type="button">Sync now</button>
+                  <button class="btn btn-secondary btn-block" id="accountRefreshBtn" type="button">Refresh from cloud</button>
+                  <button class="btn btn-danger btn-block" id="accountSignOutBtn" type="button">Sign out</button>
+                </div>
+                <div class="account-actions stack-actions">
+                  <button class="btn btn-secondary btn-block" id="accountExportBtn" type="button">📥 Export</button>
+                  <button class="btn btn-secondary btn-block" id="accountImportBtn" type="button">📤 Import</button>
+                  <button class="btn btn-secondary btn-block" id="accountShareBtn" type="button">🔗 Share</button>
+                </div>
+                <div class="account-section">
+                  <label for="themeSelect" class="account-section-label">Theme</label>
+                  <select id="themeSelect" class="theme-select account-theme-select" aria-label="Select color theme">
+                    <option value="light">☀️ Light (Default)</option>
+                    <option value="github-light">☀️ GitHub Light</option>
+                    <option value="solarized-light">☀️ Solarized Light</option>
+                    <option value="quiet-light">☀️ Quiet Light</option>
+                    <option value="monokai">🌙 Monokai</option>
+                    <option value="one-dark-pro">🌙 One Dark Pro</option>
+                    <option value="dracula">🌙 Dracula</option>
+                    <option value="github-dark">🌙 GitHub Dark</option>
+                    <option value="nord">🌙 Nord</option>
+                    <option value="solarized-dark">🌙 Solarized Dark</option>
+                    <option value="night-owl">🌙 Night Owl</option>
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -52,51 +87,6 @@ function getAppTemplate() {
       <div class="toolbar">
         <div class="toolbar-left">
           <button id="addProjectBtn" class="btn btn-primary">+ Add Project</button>
-          <button id="spreadsheetBtn" class="btn btn-secondary" title="Edit all projects in spreadsheet view">📋 Table View</button>
-          <div class="view-controls">
-            <label for="viewTypeSelect">View:</label>
-            <select id="viewTypeSelect" aria-label="Select view type">
-              <option value="quarter">Quarter (13 weeks)</option>
-              <option value="month">Single Month</option>
-              <option value="6weeks">6 Weeks</option>
-              <option value="2weeks">2 Weeks (detailed)</option>
-            </select>
-          </div>
-        </div>
-        <div class="toolbar-right">
-          <div class="filter-controls">
-            <input type="text" id="searchInput" placeholder="Search projects..." class="search-input" aria-label="Search projects" />
-            <select id="filterStatus" class="filter-select" aria-label="Filter by status">
-              <option value="">All Statuses</option>
-              <option value="planned">Planned</option>
-              <option value="in-progress">In Progress</option>
-              <option value="at-risk">At Risk</option>
-              <option value="blocked">Blocked</option>
-              <option value="completed">Completed</option>
-            </select>
-            <select id="filterAssignee" class="filter-select" aria-label="Filter by assignee">
-              <option value="">All Assignees</option>
-            </select>
-            <select id="filterType" class="filter-select" aria-label="Filter by type">
-              <option value="">All Types</option>
-              <option value="feature">✨ Feature</option>
-              <option value="bug-fix">🐛 Bug Fix</option>
-              <option value="tech-debt">🔧 Tech Debt</option>
-              <option value="infrastructure">🏗️ Infrastructure</option>
-              <option value="research">🔬 Research</option>
-              <option value="security">🔒 Security</option>
-              <option value="performance">⚡ Performance</option>
-              <option value="documentation">📝 Documentation</option>
-              <option value="testing">🧪 Testing</option>
-              <option value="design">🎨 Design</option>
-              <option value="support">🎧 Support</option>
-              <option value="ops">⚙️ Operations</option>
-              <option value="maintenance">🛠️ Maintenance</option>
-              <option value="integration">🔗 Integration</option>
-              <option value="migration">📦 Migration</option>
-            </select>
-            <button id="clearFiltersBtn" class="btn btn-small btn-secondary" aria-label="Clear filters">Clear</button>
-          </div>
         </div>
       </div>
 
@@ -529,6 +519,39 @@ function getAppTemplate() {
           </div>
           <div class="modal-footer">
             <button class="btn btn-primary" id="saveTypePreferencesBtn" type="button">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal" id="authModal" aria-hidden="true" role="dialog">
+        <div class="modal-content modal-small">
+          <div class="modal-header">
+            <h2>☁️ Account & Sync</h2>
+            <button class="modal-close" id="closeAuthModal" aria-label="Close auth modal">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="auth-status-message" id="authStatusMessage"></p>
+            <div id="authConfigMissing" class="auth-alert" style="display: none;">
+              Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env.
+            </div>
+            <div id="authLoggedOut" class="form-section">
+              <div class="form-group">
+                <label for="authEmail">Email</label>
+                <input type="email" id="authEmail" placeholder="you@example.com" />
+              </div>
+              <div class="form-group">
+                <label for="authPassword">Password</label>
+                <input type="password" id="authPassword" placeholder="••••••••" />
+              </div>
+              <div class="form-group">
+                <label for="authDisplayName">Display Name (for signup)</label>
+                <input type="text" id="authDisplayName" placeholder="QuarterBack Planner" />
+              </div>
+              <div class="button-row">
+                <button class="btn btn-primary btn-block" id="authLoginBtn" type="button">Log In</button>
+                <button class="btn btn-secondary btn-block" id="authSignupBtn" type="button">Sign Up</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
