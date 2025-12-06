@@ -912,11 +912,13 @@ body.theme-quiet-light {
 }
 
 .header-controls {
+  justify-content: space-between;
   display: flex;
   gap: 0.75rem;
   flex-wrap: nowrap;
   align-items: center;
   overflow: visible;
+  flex: 1;
 }
 
 .theme-select {

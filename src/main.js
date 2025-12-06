@@ -1,28 +1,28 @@
-import './style.css'
-import App, { QuarterBackApp } from './app.js'
+import "./style.css";
+import App, { QuarterBackApp } from "./app.js";
 
-const mount = document.querySelector('#app')
+const mount = document.querySelector("#app");
 
 if (!mount) {
-  throw new Error('Root element #app not found')
+    throw new Error("Root element #app not found");
 }
 
-mount.innerHTML = getAppTemplate()
+mount.innerHTML = getAppTemplate();
 
-const app = App instanceof QuarterBackApp ? App : new QuarterBackApp()
-window.App = app
-;(async () => {
-  await app.init()
-})()
+const app = App instanceof QuarterBackApp ? App : new QuarterBackApp();
+window.App = app;
+(async () => {
+    await app.init();
+})();
 
 function getAppTemplate() {
-  return `
+    return `
     <a href="#main-content" class="skip-link">Skip to main content</a>
     <div class="app-shell" role="application" aria-label="QuarterBack Planning Tool">
       <header class="header" role="banner">
         <div class="header-content">
-          <h1>📊 QuarterBack</h1>
           <nav class="header-controls" aria-label="Main navigation">
+            <h1>📊 QuarterBack</h1>
             <select id="quarterSelect" class="quarter-select" aria-label="Select quarter">
               <option value="Q1-2024">Q1 2024</option>
               <option value="Q2-2024">Q2 2024</option>
@@ -31,6 +31,7 @@ function getAppTemplate() {
               <option value="Q1-2025">Q1 2025</option>
               <option value="Q2-2025">Q2 2025</option>
             </select>
+            <button id="addProjectBtn" class="btn btn-primary">+ Add Project</button>
             <button id="spreadsheetBtn" class="btn btn-secondary" title="Edit all projects in spreadsheet view">📋 Table View</button>
             <button id="capacityBtn" class="btn btn-secondary" aria-label="Open capacity planning tool">⚙️ Capacity</button>
             <div class="header-search">
@@ -83,12 +84,6 @@ function getAppTemplate() {
           </div>
         </div>
       </header>
-
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <button id="addProjectBtn" class="btn btn-primary">+ Add Project</button>
-        </div>
-      </div>
 
       <div class="capacity-summary" id="capacitySummary">
         <div class="capacity-text">
@@ -579,5 +574,5 @@ function getAppTemplate() {
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </div>
-  `
+  `;
 }
