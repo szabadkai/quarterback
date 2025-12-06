@@ -1,6 +1,5 @@
 import "./style.css";
 import App, { QuarterBackApp } from "./app.js";
-import { APP_VERSION } from "./env-version.js";
 
 const mount = document.querySelector("#app");
 
@@ -8,10 +7,8 @@ if (!mount) {
   throw new Error("Root element #app not found");
 }
 
-const baseUrl = import.meta.env?.BASE_URL ?? "/";
-const logoSrc = new URL("quarterback-logo.png", window.location.origin + baseUrl).toString();
-const version = APP_VERSION || import.meta.env?.VITE_APP_VERSION || "dev";
-mount.innerHTML = getAppTemplate({ logoSrc, version });
+const logoSrc = "quarterback-logo.png";
+mount.innerHTML = getAppTemplate({ logoSrc });
 
 const app = App instanceof QuarterBackApp ? App : new QuarterBackApp();
 window.App = app;
@@ -19,7 +16,7 @@ window.App = app;
   await app.init();
 })();
 
-function getAppTemplate({ logoSrc, version }) {
+function getAppTemplate({ logoSrc }) {
     return `
     <a href="#main-content" class="skip-link">Skip to main content</a>
     <div class="app-shell" role="application" aria-label="QuarterBack Planning Tool">
@@ -582,11 +579,6 @@ function getAppTemplate({ logoSrc, version }) {
       </div>
 
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
-      <footer class="footer">
-        <span class="footer-version">v${version}</span>
-        <span class="footer-separator">•</span>
-        <span class="footer-author">QuarterBack</span>
-      </footer>
     </div>
   `;
 }

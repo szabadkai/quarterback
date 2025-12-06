@@ -1,6 +1,6 @@
 {
   "name": "quarterback",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -18,8 +18,7 @@
     "test:e2e": "playwright test",
     "test:coverage": "node --test --experimental-test-coverage",
     "prepare": "node scripts/setup-hooks.js",
-    "version:auto": "node scripts/version-auto.js",
-    "prebuild": "node scripts/inject-version.js"
+    "version:auto": "node scripts/version-auto.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
