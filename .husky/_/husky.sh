@@ -1,16 +1,9 @@
-#!/bin/sh
+echo "husky - DEPRECATED
 
-# Minimal husky bootstrap (offline friendly)
-if [ -z "$husky_skip_init" ]; then
-  husky_skip_init=1
-  export husky_skip_init
+Please remove the following two lines from $0:
 
-  command_exists() {
-    command -v "$1" >/dev/null 2>&1
-  }
+#!/usr/bin/env sh
+. \"\$(dirname -- \"\$0\")/_/husky.sh\"
 
-  # Windows 10 Git Bash workaround
-  if command_exists winpty && test -t 1; then
-    exec < /dev/tty
-  fi
-fi
+They WILL FAIL in v10.0.0
+"
