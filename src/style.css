@@ -911,6 +911,23 @@ body.theme-quiet-light {
   color: var(--primary-color);
 }
 
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.brand-logo {
+  height: 42px;
+  width: auto;
+  display: block;
+}
+
+.brand-text {
+  display: inline-block;
+}
+
 .header-controls {
   justify-content: space-between;
   display: flex;

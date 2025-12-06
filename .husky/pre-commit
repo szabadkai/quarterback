@@ -1,6 +1,9 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
+echo "Updating version..."
+npm run version:auto || exit 1
+
 echo "Running tests before commit..."
 npm test || exit 1
 npm run test:coverage || exit 1

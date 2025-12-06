@@ -494,6 +494,18 @@ export class QuarterBackApp {
         target: '#backlogDock',
       },
       {
+        id: 'timeline',
+        title: 'Visualize on the Gantt',
+        body: 'Use the Gantt to drag/resize bars and see conflicts at a glance.',
+        target: '#ganttTimeline',
+      },
+      {
+        id: 'editProject',
+        title: 'Edit project details',
+        body: 'Click a bar or use the edit modal to adjust owners, dates, status, and ICE.',
+        target: '#projectModal',
+      },
+      {
         id: 'account',
         title: 'Account, exports, and themes',
         body: 'Open the avatar to export/import, share, and switch themes. Cloud sync is here too.',
@@ -508,6 +520,7 @@ export class QuarterBackApp {
     this.tourSteps = this.getOnboardingSteps();
     this.tourStepIndex = 0;
     this.tourActive = true;
+    this.tourOpenedProjectModal = false;
     this.showTourStep();
   }
 
@@ -517,6 +530,10 @@ export class QuarterBackApp {
     this.clearTourHighlight();
     const overlay = document.getElementById('tourOverlay');
     if (overlay) overlay.classList.add('hidden');
+    if (this.tourOpenedProjectModal) {
+      this.closeProjectModal();
+      this.tourOpenedProjectModal = false;
+    }
   }
 
   nextTourStep() {
@@ -562,6 +579,24 @@ export class QuarterBackApp {
       return;
     }
     this.clearTourHighlight();
+
+    // Adjust context for specific steps (e.g., open edit modal)
+    if (step.id === 'editProject') {
+      const modal = document.getElementById('projectModal');
+      const isOpen = modal?.classList.contains('active');
+      if (!isOpen) {
+        const project = this.projects[0] || null;
+        if (project) {
+          this.openProjectModal(project);
+        } else {
+          this.openProjectModal(null);
+        }
+        this.tourOpenedProjectModal = true;
+      }
+    } else if (this.tourOpenedProjectModal) {
+      this.closeProjectModal();
+      this.tourOpenedProjectModal = false;
+    }
 
     const target = document.querySelector(step.target);
     if (target) {

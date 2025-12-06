@@ -22,7 +22,10 @@ function getAppTemplate() {
       <header class="header" role="banner">
         <div class="header-content">
           <nav class="header-controls" aria-label="Main navigation">
-            <h1>📊 QuarterBack</h1>
+          <h1 class="brand">
+            <img src="/quarterback-logo.png" alt="" class="brand-logo" aria-hidden="true" />
+            <span class="brand-text">QuarterBack</span>
+          </h1>
             <select id="quarterSelect" class="quarter-select" aria-label="Select quarter">
               <option value="Q1-2024">Q1 2024</option>
               <option value="Q2-2024">Q2 2024</option>
