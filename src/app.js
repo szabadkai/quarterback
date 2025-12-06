@@ -307,6 +307,10 @@ export class QuarterBackApp {
       }
     });
     document.getElementById('closeAuthModal')?.addEventListener('click', () => this.closeAuthModal());
+    document.getElementById('authForm')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.handleAuthLogin();
+    });
     document.getElementById('authLoginBtn')?.addEventListener('click', () => this.handleAuthLogin());
     document.getElementById('authSignupBtn')?.addEventListener('click', () => this.handleAuthSignup());
 

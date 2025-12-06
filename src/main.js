@@ -7,7 +7,8 @@ if (!mount) {
   throw new Error("Root element #app not found");
 }
 
-const logoSrc = `${(import.meta.env?.BASE_URL ?? "/")}`.replace(/\/?$/, "/").concat("quarterback-logo.png");
+const baseUrl = import.meta.env?.BASE_URL ?? "/";
+const logoSrc = new URL("quarterback-logo.png", window.location.origin + baseUrl).toString();
 mount.innerHTML = getAppTemplate({ logoSrc });
 
 const app = App instanceof QuarterBackApp ? App : new QuarterBackApp();
@@ -534,22 +535,24 @@ function getAppTemplate({ logoSrc }) {
               Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env.
             </div>
             <div id="authLoggedOut" class="form-section">
-              <div class="form-group">
-                <label for="authEmail">Email</label>
-                <input type="email" id="authEmail" placeholder="you@example.com" />
-              </div>
-              <div class="form-group">
-                <label for="authPassword">Password</label>
-                <input type="password" id="authPassword" placeholder="••••••••" />
-              </div>
-              <div class="form-group">
-                <label for="authDisplayName">Display Name (for signup)</label>
-                <input type="text" id="authDisplayName" placeholder="QuarterBack Planner" />
-              </div>
-              <div class="button-row">
-                <button class="btn btn-primary btn-block" id="authLoginBtn" type="button">Log In</button>
-                <button class="btn btn-secondary btn-block" id="authSignupBtn" type="button">Sign Up</button>
-              </div>
+              <form id="authForm" class="auth-form" novalidate>
+                <div class="form-group">
+                  <label for="authEmail">Email</label>
+                  <input type="email" id="authEmail" placeholder="you@example.com" />
+                </div>
+                <div class="form-group">
+                  <label for="authPassword">Password</label>
+                  <input type="password" id="authPassword" placeholder="••••••••" />
+                </div>
+                <div class="form-group">
+                  <label for="authDisplayName">Display Name (for signup)</label>
+                  <input type="text" id="authDisplayName" placeholder="QuarterBack Planner" />
+                </div>
+                <div class="button-row">
+                  <button class="btn btn-primary btn-block" id="authLoginBtn" type="submit">Log In</button>
+                  <button class="btn btn-secondary btn-block" id="authSignupBtn" type="button">Sign Up</button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
