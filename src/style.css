@@ -91,6 +91,7 @@
   gap: 0;
   position: relative;
   z-index: 10;
+  margin-left: auto;
 }
 
 .account-trigger {
@@ -928,7 +929,7 @@ body.theme-quiet-light {
 }
 
 .header-controls {
-  justify-content: space-between;
+  justify-content: flex-start;
   display: flex;
   gap: 0.75rem;
   flex-wrap: nowrap;
